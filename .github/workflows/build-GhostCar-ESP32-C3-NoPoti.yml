@@ -134,7 +134,7 @@ jobs:
           mkdir -p artifact_package/${SUB_DIR}/bin
           mkdir -p artifact_package/${SUB_DIR}/windows
           mkdir -p artifact_package/${SUB_DIR}/linux
-        #mkdir -p artifact_package/${SUB_DIR}/osx
+          kdir -p artifact_package/${SUB_DIR}/osx
 
       - name: Move compiled binaries to Artifact Directory
         run: |
@@ -155,8 +155,8 @@ jobs:
           cp ./dev-tools/github-workflow-files/flasher/windows/README.md ./artifact_package/${SUB_DIR}/windows/
           cp ./dev-tools/github-workflow-files/flasher/linux/ESP32-C3_GhostCar.sh ./artifact_package/${SUB_DIR}/linux/
           cp ./dev-tools/github-workflow-files/flasher/linux/esptool ./artifact_package/${SUB_DIR}/linux/
-          #cp ./dev-tools/github-workflow-files/flasher/osx/ESP32-C3_GhostCar.sh ./artifact_package/${SUB_DIR}/osx/
-          #cp ./dev-tools/github-workflow-files/flasher/osx/esptool ./artifact_package/${SUB_DIR}/osx/
+          cp ./dev-tools/github-workflow-files/flasher/osx/ESP32-C3_GhostCar.sh ./artifact_package/${SUB_DIR}/osx/
+          cp ./dev-tools/github-workflow-files/flasher/osx/esptool ./artifact_package/${SUB_DIR}/osx/
 
       - name: lst package content
         run: |
