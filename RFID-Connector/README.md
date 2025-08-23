@@ -19,7 +19,7 @@ Passende RFID-Aufkleber können bei Amazon bezogen werden.
 ## Beispielhardware/Bezugsquellen:
 
 AliExpress: (Bitte die richtige Auswahl treffen! Meist ist nur ein Aufklebersatz für unter 10 Euro als default selektiert!)<br>
-Mir ist aktuell keine Bezugsquelle aus Deutschland bekannt. Der Chip selber arbeitet mit in der EU zulässigen RFID-Frequenzen (wurde in der Software konfiguriert).
+Mir ist aktuell keine Bezugsquelle aus Deutschland bekannt. Der Chip selber arbeitet mit in der EU zulässigen RFID-Frequenzen (wurde in der Software konfiguriert).<br>
 <img src="../images/Invelion_R200_1dbi.png"/>
 <br><br>
 ESP32-WROOM-32U mit externem Antennenanschluss:<br>
