@@ -35,7 +35,7 @@ jobs:
         run: |
           CUSTOM_LIBS_ZIP_DIR="./StartingLightsDisplay/libraries" # Aktualisierter Pfad für dich
           ARDUINO_CLI_LIB_DIR="$HOME/Arduino/libraries" # Das Standard-Bibliotheksverzeichnis der Arduino CLI
-          
+
           # Sicherstellen, dass die Verzeichnisse existieren
           mkdir -p "${ARDUINO_CLI_LIB_DIR}"
           if [ ! -d "${CUSTOM_LIBS_ZIP_DIR}" ]; then
@@ -50,11 +50,11 @@ jobs:
             if [ -f "$zip_file" ]; then # Sicherstellen, dass es wirklich eine Datei ist
               LIB_NAME=$(basename "$zip_file" .zip) # Extrahiert den Namen der Bibliothek (ohne .zip)
               echo "Entpacke und installiere Bibliothek: ${LIB_NAME} von $(basename "$zip_file")..."
-              
+
               # Entpacke die ZIP-Datei direkt in das Arduino CLI Bibliotheksverzeichnis
               # Der Pfad nach -d muss der Ordner sein, in dem die Bibliothek nach dem Entpacken liegen soll
               unzip -q "$zip_file" -d "${ARDUINO_CLI_LIB_DIR}"
-              
+
               if [ $? -ne 0 ]; then
                 echo "Fehler: Entpacken von $(basename "$zip_file") fehlgeschlagen."
                 exit 1 # Den Build abbrechen, wenn das Entpacken fehlschlägt
@@ -62,7 +62,7 @@ jobs:
             fi
           done
           echo "Installation der benutzerdefinierten Bibliotheken abgeschlossen."
-          
+
           # Liste alle installierten Bibliotheken auf, um zu debuggen
           echo "Installierte Bibliotheken nach diesem Schritt:"
           arduino-cli lib list
@@ -79,7 +79,7 @@ jobs:
         run: |
           # Define a clear build output directory
           BUILD_OUTPUT_DIR="build_output"
-          
+
           arduino-cli compile \
             --fqbn esp32:esp32:esp32c6 \
             --build-path ${BUILD_OUTPUT_DIR} \
