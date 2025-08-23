@@ -43,7 +43,7 @@ jobs:
         run: |
           # Define a clear build output directory
           BUILD_OUTPUT_DIR="build_output"
-
+          
           arduino-cli compile --fqbn esp32:esp32:esp32 --build-path ${BUILD_OUTPUT_DIR} ./RFID-Label-Writer/
 
       - name: Create Artifact Directory
@@ -52,7 +52,7 @@ jobs:
           mkdir -p artifact_package/${SUB_DIR}/bin
           mkdir -p artifact_package/${SUB_DIR}/windows
           mkdir -p artifact_package/${SUB_DIR}/linux
-        #mkdir -p artifact_package/${SUB_DIR}/osx
+          mkdir -p artifact_package/${SUB_DIR}/osx
 
       - name: Move compiled binaries to Artifact Directory
         run: |
