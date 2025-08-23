@@ -1,6 +1,5 @@
 local_artifacts/*
 .secrets
-dev-tools/github-workflow-files/flasher/osx/*
 KiCad/RFID-Connector/RFID-Connector-backups/*
 KiCad/RFID-Connector/production/*
 KiCad/RFID-Connector/fabrication-toolkit-options.json
