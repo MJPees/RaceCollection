@@ -35,7 +35,7 @@ jobs:
         run: |
           CUSTOM_LIBS_ZIP_DIR="./GhostCar/libraries" # Aktualisierter Pfad für dich
           ARDUINO_CLI_LIB_DIR="$HOME/Arduino/libraries" # Das Standard-Bibliotheksverzeichnis der Arduino CLI
-
+          
           # Sicherstellen, dass die Verzeichnisse existieren
           mkdir -p "${ARDUINO_CLI_LIB_DIR}"
           if [ ! -d "${CUSTOM_LIBS_ZIP_DIR}" ]; then
@@ -50,11 +50,11 @@ jobs:
             if [ -f "$zip_file" ]; then # Sicherstellen, dass es wirklich eine Datei ist
               LIB_NAME=$(basename "$zip_file" .zip) # Extrahiert den Namen der Bibliothek (ohne .zip)
               echo "Entpacke und installiere Bibliothek: ${LIB_NAME} von $(basename "$zip_file")..."
-
+              
               # Entpacke die ZIP-Datei direkt in das Arduino CLI Bibliotheksverzeichnis
               # Der Pfad nach -d muss der Ordner sein, in dem die Bibliothek nach dem Entpacken liegen soll
               unzip -q "$zip_file" -d "${ARDUINO_CLI_LIB_DIR}"
-
+              
               if [ $? -ne 0 ]; then
                 echo "Fehler: Entpacken von $(basename "$zip_file") fehlgeschlagen."
                 exit 1 # Den Build abbrechen, wenn das Entpacken fehlschlägt
@@ -62,7 +62,7 @@ jobs:
             fi
           done
           echo "Installation der benutzerdefinierten Bibliotheken abgeschlossen."
-
+          
           # Liste alle installierten Bibliotheken auf, um zu debuggen
           echo "Installierte Bibliotheken nach diesem Schritt:"
           arduino-cli lib list
@@ -95,7 +95,7 @@ jobs:
           # Zeile '#define ESP32S3' deaktivieren (auskommentieren, falls aktiv)
           sed -i 's/^#[[:space:]]*define ESP32S3/\/\/#define ESP32S3/g' "${CONFIG_FILE}"
           echo "-> '#define ESP32S3' deaktiviert."
-
+          
           # Zeile 'define SPEED_POT_PIN' auskommentieren
           sed -i 's/^[[:space:]]*#[[:space:]]*define SPEED_POT_PIN/\/\/#define SPEED_POT_PIN/g' "${CONFIG_FILE}"
           echo "-> 'SPEED_POT_PIN' ist nun auskommentiert."
@@ -103,7 +103,7 @@ jobs:
           # Zeile 'define STARTING_LIGHTS' auskommentieren
           sed -i 's/^\([[:space:]]*#[[:space:]]*define STARTING_LIGHTS\b.*\)/\/\/\1/g' "${CONFIG_FILE}"
           echo "-> 'STARTING_LIGHTS' ist nun auskommentiert."
-
+          
           # Optional: Änderungen im Log anzeigen
           echo "Angepasster Sketch-Inhalt (Auszug Definitionen):"
           grep -E "define ESP32C3|define ESP32S3|define SPEED_POT_PIN|define STARTING_LIGHTS" "${CONFIG_FILE}" || true

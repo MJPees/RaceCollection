@@ -43,7 +43,7 @@ jobs:
         run: |
           # Define a clear build output directory
           BUILD_OUTPUT_DIR="build_output"
-
+          
           arduino-cli compile --fqbn esp32:esp32:esp32 --build-path ${BUILD_OUTPUT_DIR} ./RFID-Connector/
 
       - name: Create Artifact Directory

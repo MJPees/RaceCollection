@@ -1,5 +1,4 @@
 #include "StartingLights.h" //Needs FastLED by Daniel Garcia
-#include "config.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
