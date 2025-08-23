@@ -155,11 +155,14 @@ jobs:
         run: |
           SUB_DIR="GhostCar-StartingLights-ESP32-S3-Poti"
           cp ./dev-tools/github-workflow-files/flasher/windows/ESP32-S3_GhostCar.ps1 ./artifact_package/${SUB_DIR}/windows/
+          cp ./dev-tools/github-workflow-files/flasher/windows/erase_ESP32-S3.ps1 ./artifact_package/${SUB_DIR}/windows/          
           cp ./dev-tools/github-workflow-files/flasher/windows/esptool.exe ./artifact_package/${SUB_DIR}/windows/
           cp ./dev-tools/github-workflow-files/flasher/windows/README.md ./artifact_package/${SUB_DIR}/windows/
           cp ./dev-tools/github-workflow-files/flasher/linux/ESP32-S3_GhostCar.sh ./artifact_package/${SUB_DIR}/linux/
+          cp ./dev-tools/github-workflow-files/flasher/linux/erase_ESP32-S3.sh ./artifact_package/${SUB_DIR}/linux/          
           cp ./dev-tools/github-workflow-files/flasher/linux/esptool ./artifact_package/${SUB_DIR}/linux/
           cp ./dev-tools/github-workflow-files/flasher/osx/ESP32-S3_GhostCar.sh ./artifact_package/${SUB_DIR}/osx/
+          cp ./dev-tools/github-workflow-files/flasher/osx/erase_ESP32-S3.sh ./artifact_package/${SUB_DIR}/osx/
           cp ./dev-tools/github-workflow-files/flasher/osx/esptool ./artifact_package/${SUB_DIR}/osx/
 
       - name: lst package content

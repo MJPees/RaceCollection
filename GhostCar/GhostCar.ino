@@ -1,3 +1,4 @@
+#include "StartingLights.h" //Needs FastLED by Daniel Garcia
 #include "config.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -10,7 +11,6 @@
   #include <Joystick_ESP32S2.h> //https://github.com/schnoog/Joystick_ESP32S2
 #endif
 #include "src/Joystick_BLE/Joystick_BLE.h"
-#include "StartingLights.h" //Needs FastLED by Daniel Garcia
 
 /* configuration */
 #ifdef STARTING_LIGHTS
