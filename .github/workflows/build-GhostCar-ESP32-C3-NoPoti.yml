@@ -136,6 +136,7 @@ jobs:
           mkdir -p artifact_package/${SUB_DIR}/linux
           mkdir -p artifact_package/${SUB_DIR}/osx
 
+
       - name: Move compiled binaries to Artifact Directory
         run: |
           BUILD_OUTPUT_DIR="build_output"
