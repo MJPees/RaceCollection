@@ -1,5 +1,6 @@
 #ifndef CONFIG_H
 #define CONFIG_H
+#include <FastLED.h>
 
 #define VERSION "1.4.2" // dont forget to update the releases.json
 
