@@ -113,8 +113,8 @@ jobs:
           cp ./dev-tools/github-workflow-files/flasher/linux/ESP32-C6_StartingLightsDisplay.sh ./artifact_package/${SUB_DIR}/linux/
           cp ./dev-tools/github-workflow-files/flasher/linux/esptool ./artifact_package/${SUB_DIR}/linux/
           cp -r ./StartingLightsDisplay/sdcard ./artifact_package/${SUB_DIR}/
-        #cp ./dev-tools/github-workflow-files/flasher/osx/ESP32-C6_StartingLightsDisplay.sh ./artifact_package/${SUB_DIR}/osx/
-        #cp ./dev-tools/github-workflow-files/flasher/osx/esptool ./artifact_package/${SUB_DIR}/osx/
+          cp ./dev-tools/github-workflow-files/flasher/osx/ESP32-C6_StartingLightsDisplay.sh ./artifact_package/${SUB_DIR}/osx/
+          cp ./dev-tools/github-workflow-files/flasher/osx/esptool ./artifact_package/${SUB_DIR}/osx/
 
       - name: lst package content
         run: |

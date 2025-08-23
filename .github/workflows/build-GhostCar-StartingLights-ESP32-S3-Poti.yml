@@ -159,8 +159,8 @@ jobs:
           cp ./dev-tools/github-workflow-files/flasher/windows/README.md ./artifact_package/${SUB_DIR}/windows/
           cp ./dev-tools/github-workflow-files/flasher/linux/ESP32-S3_GhostCar.sh ./artifact_package/${SUB_DIR}/linux/
           cp ./dev-tools/github-workflow-files/flasher/linux/esptool ./artifact_package/${SUB_DIR}/linux/
-        #cp ./dev-tools/github-workflow-files/flasher/osx/ESP32-S3_GhostCar.sh ./artifact_package/${SUB_DIR}/osx/
-        #cp ./dev-tools/github-workflow-files/flasher/osx/esptool ./artifact_package/${SUB_DIR}/osx/
+          cp ./dev-tools/github-workflow-files/flasher/osx/ESP32-S3_GhostCar.sh ./artifact_package/${SUB_DIR}/osx/
+          cp ./dev-tools/github-workflow-files/flasher/osx/esptool ./artifact_package/${SUB_DIR}/osx/
 
       - name: lst package content
         run: |
@@ -174,7 +174,7 @@ jobs:
       - name: Upload Binaries as Artifact
         uses: actions/upload-artifact@v4
         with:
-          path: artifact_package 
+          path: artifact_package
           #name: ${{ steps.timestamp_gen.outputs.BUILD_DATE }}-GhostCar-StartingLights-ESP32-S3-Poti
           name: GhostCar-StartingLights-ESP32-S3-Poti
           retention-days: 7
