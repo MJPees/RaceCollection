@@ -82,11 +82,14 @@ jobs:
         run: |
           SUB_DIR="RFID-Connector-ESP32-DEV-PCB_V1.0"
           cp ./dev-tools/github-workflow-files/flasher/windows/ESP32-DEV_RFID-Connector.ps1 ./artifact_package/${SUB_DIR}/windows/
+          cp ./dev-tools/github-workflow-files/flasher/windows/erase_ESP32-DEV.ps1 ./artifact_package/${SUB_DIR}/windows/          
           cp ./dev-tools/github-workflow-files/flasher/windows/esptool.exe ./artifact_package/${SUB_DIR}/windows/
           cp ./dev-tools/github-workflow-files/flasher/windows/README.md ./artifact_package/${SUB_DIR}/windows/
           cp ./dev-tools/github-workflow-files/flasher/linux/ESP32-DEV_RFID-Connector.sh ./artifact_package/${SUB_DIR}/linux/
+          cp ./dev-tools/github-workflow-files/flasher/linux/erase_ESP32-DEV.sh ./artifact_package/${SUB_DIR}/linux/
           cp ./dev-tools/github-workflow-files/flasher/linux/esptool ./artifact_package/${SUB_DIR}/linux/
           cp ./dev-tools/github-workflow-files/flasher/osx/ESP32-DEV_RFID-Connector.sh ./artifact_package/${SUB_DIR}/osx/
+          cp ./dev-tools/github-workflow-files/flasher/osx/erase_ESP32-DEV.sh ./artifact_package/${SUB_DIR}/osx/
           cp ./dev-tools/github-workflow-files/flasher/osx/esptool ./artifact_package/${SUB_DIR}/osx/
 
       - name: lst package content
