@@ -110,6 +110,20 @@ void StartingLights::setRowLights(const int* rows, int numRows, CRGB color) {
   FastLED.show();
 }
 
+void StartingLights::setColumnLights(int col, const int* rows, int numRows, CRGB color) {
+  if (col < 0 || col >= ledsPerRow) return;
+  for (int r = 0; r < numRows; r++) {
+    int row = rows[r] - 1;
+    if (row >= 0 && row < ledRows) {
+      int idx = getMatrixIndex(row, col);
+      if (idx >= 0 && idx < numLeds) {
+        leds[idx] = color;
+      }
+    }
+  }
+  FastLED.show();
+}
+
 void StartingLights::runCountDownLights(const int* rows, int numRows, unsigned int countDownTime, CRGB color) {
     setAllLightsOff();
     sequenceIsRunning = true;

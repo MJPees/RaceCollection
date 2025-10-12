@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define VERSION "1.4.2" // dont forget to update the releases.json
+#define VERSION "1.4.3" // dont forget to update the releases.json
 
 //#define DEBUG // enable debug output to Serial Monitor
 

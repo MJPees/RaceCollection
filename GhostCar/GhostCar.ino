@@ -503,8 +503,13 @@ void handleRacingClubUpdateEvent(String command, JsonDocument doc) {
       Serial.println("INFO - starting");
     #endif
     startingLights.stopRunningSequence();
-    startingLights.runCountDownLights(chRacingClubCountdownLedRows, chRacingClubCountdownLedNumRows, CH_RACING_CLUB_LEDS_COUNTDOWN_TIME, RED);
     activateLaunchControl();
+  } else if (command == "starting_lights") {
+    #if defined(DEBUG) && defined(ESP32C3)
+      Serial.print("INFO - starting_lights: ");
+      Serial.println(doc["count"].as<String>());
+    #endif
+    startingLights.setColumnLights(doc["count"].as<int>()-1, chRacingClubCountdownLedRows, chRacingClubCountdownLedNumRows, RED);
   } else if (command == "drive") {
     #if defined(DEBUG) && defined(ESP32C3)
       Serial.println("INFO - running");

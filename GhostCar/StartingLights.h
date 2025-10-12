@@ -29,6 +29,7 @@ class StartingLights {
     void setAllLightsOff();
     void setAllLights(CRGB color);
     void setRowLights(const int* rows, int numRows, CRGB color);
+    void setColumnLights(int col, const int* rows, int numRows, CRGB color);
     void runCountDownLights(const int* rows, int numRows, unsigned int countDownTime, CRGB color);
     void runFlashLights(const int* rows, int numRows, unsigned int interval, CRGB color, int maxFlashCount = -1);
     bool isSequenceRunning(LedMode mode) const { return sequenceIsRunning && this->mode == mode; }
