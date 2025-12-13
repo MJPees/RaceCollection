@@ -13,7 +13,7 @@
 #define WIFI_DEFAULT_HOSTNAME "rfid-connector"
 #define PREFERENCES_NAMESPACE "racebox"
 
-#define VERSION "1.4.0" // dont forget to update the releases.json
+#define VERSION "1.5.0" // dont forget to update the releases.json
 //#define DEBUG
 
 //#define ESP32C3
@@ -62,7 +62,8 @@
 
 #define RFID_REPEAT_TIME 3000
 #define RFID_RESTART_TIME 300000
-#define RFID_MAX_COUNT 8
+#define RFID_MAX_COUNT 30 // max für freies Fahren laut Carrera
+#define RFID_SMARTRACE_MAX_COUNT 8
 #define RFID_STORAGE_COUNT 2
 
 #define debounceDelay 50
@@ -179,13 +180,29 @@ void configurationSave() {
   preferences.putString("chrc_ws_ca_cert", chRacingClubCaCert);
   preferences.putString("chrc_api_key", chRacingClubApiKey);
 
+  if (targetSystem == "smart_race") {
+    char key[20];
+    for(int i=0; i<RFID_SMARTRACE_MAX_COUNT; i++) {
+      snprintf(key, sizeof(key), "RFID%d", i);
+      preferences.putString(key, rfids[i].name);
+      for(int j=0; j<RFID_STORAGE_COUNT; j++) {
+        snprintf(key, sizeof(key), "RFID%d_%d", i, j);
+        preferences.putString(key, rfids[i].id[j]);
+      }
+    }
+  }
+}
+
+void loadRfidStorage() {
   char key[20];
-  for(int i=0; i<RFID_MAX_COUNT; i++) {
+  char defaultName[20];
+  for(int i=0; i<RFID_SMARTRACE_MAX_COUNT; i++) {
     snprintf(key, sizeof(key), "RFID%d", i);
-    preferences.putString(key, rfids[i].name);
+    snprintf(defaultName, sizeof(defaultName), "Controller %d", i+1);
+    rfids[i].name = preferences.getString(key, defaultName);
     for(int j=0; j<RFID_STORAGE_COUNT; j++) {
       snprintf(key, sizeof(key), "RFID%d_%d", i, j);
-      preferences.putString(key, rfids[i].id[j]);
+      rfids[i].id[j] = preferences.getString(key, "");
     }
   }
 }
@@ -209,6 +226,7 @@ void configurationLoad() {
   if (targetSystem == "smart_race") {
     websocketServer = smartRaceWebsocketServer;
     websocketCaCert = "";
+    loadRfidStorage();
 
     Serial.println("\nConfiguration: RFID-Connector loaded");
   }
@@ -216,20 +234,9 @@ void configurationLoad() {
   if (targetSystem == "ch_racing_club") {
     websocketServer = chRacingClubWebsocketServer;
     websocketCaCert = chRacingClubCaCert;
+    resetRfidStorage();
 
     Serial.println("\nConfiguration: CH Racing Club loaded");
-  }
-
-  char key[20];
-  char defaultName[20];
-  for(int i=0; i<RFID_MAX_COUNT; i++) {
-    snprintf(key, sizeof(key), "RFID%d", i);
-    snprintf(defaultName, sizeof(defaultName), "Controller %d", i+1);
-    rfids[i].name = preferences.getString(key, defaultName);
-    for(int j=0; j<RFID_STORAGE_COUNT; j++) {
-      snprintf(key, sizeof(key), "RFID%d_%d", i, j);
-      rfids[i].id[j] = preferences.getString(key, "");
-    }
   }
 }
 
@@ -324,9 +331,9 @@ void handleRoot() {
   }
 
   html += "<input type='submit' style='margin-bottom:20px;' value='Speichern'>";
-  if (!wifiApMode) {
+  if (!wifiApMode && targetSystem == "smart_race") {
     html += "<div style='display: grid; grid-template-columns: 1fr; gap: 5px;'>"; // Äußerer Grid-Container
-    for (int i = 0; i < RFID_MAX_COUNT; i++) {
+    for (int i = 0; i < RFID_SMARTRACE_MAX_COUNT; i++) {
         html += "<div style='border: 3px solid black; padding: 10px; margin: 5px; display: grid; grid-template-columns: 1fr; gap: 5px;'>"; // Rahmen mit Grid-Spalte
         html += "<div style='display: grid; grid-template-columns: auto 1fr; align-items: center;'>"; // Grid für Name
         html += "<label for='name" + String(i) + "'>Name:</label>";
@@ -428,9 +435,23 @@ void handleConfig() {
         }
         websocketServer = smartRaceWebsocketServer;
         websocketCaCert = ""; // SmartRace does not use a CA cert
+        if (reConnectWebsocket == true) {
+          loadRfidStorage();
+        }
+        else {
+          char nameKey[12];
+          char idKey[16];
+          for (int i = 0; i < RFID_SMARTRACE_MAX_COUNT; i++) {
+            snprintf(nameKey, sizeof(nameKey), "name%d", i);
+            rfids[i].name = server.arg(nameKey);
+            for (int j = 0; j < RFID_STORAGE_COUNT; j++) {
+              snprintf(idKey, sizeof(idKey), "id%d_%d", i, j);
+              rfids[i].id[j] = server.arg(idKey);
+            }
+          }
+        }
       }
-
-      if (targetSystem == "ch_racing_club") {
+      else if (targetSystem == "ch_racing_club") {
         if (chRacingClubWebsocketServer != server.arg("ch_racing_club_websocket_server")) {
           reConnectWebsocket = true; // Reconnect if the server has changed
           chRacingClubWebsocketServer = server.arg("ch_racing_club_websocket_server");
@@ -447,17 +468,7 @@ void handleConfig() {
         }
         websocketServer = chRacingClubWebsocketServer;
         websocketCaCert = chRacingClubCaCert;
-      }
-
-      char nameKey[12];
-      char idKey[16];
-      for (int i = 0; i < RFID_MAX_COUNT; i++) {
-        snprintf(nameKey, sizeof(nameKey), "name%d", i);
-        rfids[i].name = server.arg(nameKey);
-        for (int j = 0; j < RFID_STORAGE_COUNT; j++) {
-          snprintf(idKey, sizeof(idKey), "id%d_%d", i, j);
-          rfids[i].id[j] = server.arg(idKey);
-        }
+        resetRfidStorage();
       }
     }
 
@@ -631,8 +642,12 @@ void sendFinishLineMessage(int controller_id, unsigned long timestamp, String rf
 
 void sendFinishLineEvent(String rfidString, unsigned long ms) {
   bool found = false;
+  int maxRfidCnt = RFID_MAX_COUNT;
+  if (targetSystem == "smart_race") {
+    maxRfidCnt = RFID_SMARTRACE_MAX_COUNT;
+  }
   for(int j = 0; j<RFID_STORAGE_COUNT;j++) {
-    for (int i = 0; i < RFID_MAX_COUNT; i++) {
+    for (int i = 0; i < maxRfidCnt; i++) {
       if(rfids[i].id[j] == rfidString) {
         if(rfids[i].last + minLapTime < ms) {
           sendFinishLineMessage(i, ms, rfidString);
@@ -646,7 +661,7 @@ void sendFinishLineEvent(String rfidString, unsigned long ms) {
     }
   }
   if(!found) {
-    for(int i=0; i < RFID_MAX_COUNT; i++) {
+    for(int i=0; i < maxRfidCnt; i++) {
       if(rfids[i].id[0] == "") {
         rfids[i].id[0] = rfidString;
         Serial.print("RFID: new car at controller id: ");
@@ -668,12 +683,37 @@ void onMessageCallback(WebsocketsMessage message) {
     Serial.println(error.c_str());
     return;
   }
+  // TODO on race aborted or finished => resetRfidStorage();
 
   #ifdef DEBUG
     Serial.print("Websocket: received message: ");
     serializeJsonPretty(doc, Serial);
     Serial.println();
   #endif
+  if (targetSystem == "ch_racing_club") {
+    //serializeJsonPretty(doc, Serial);
+    //Serial.println();
+    const char* message = doc["message"] | ""; // Falls "message" nicht existiert, wird ein leerer String zurückgegeben
+
+    if (message[0] != '\0') {
+      //Serial.print(F("Primäre Message: "));
+      //Serial.println(message);
+      // Prüfen, ob die Nachricht ein verschachteltes JSON (Command) ist
+      if (message[0] == '{') {
+          //Serial.println(F("Dies ist ein Command-JSON."));
+          JsonDocument commandDoc;
+          deserializeJson(commandDoc, message);
+          const char* command = commandDoc["command"] | "";
+          //Serial.println(command);
+          if (strcmp(command, "reset rfid") == 0) {
+            resetRfidStorage();
+            Serial.println("reset of rfid storage");
+          }
+      }
+    } else {
+      //Serial.println(F("Feld 'message' nicht gefunden."));
+    }
+  }
 }
 
 void onEventsCallback(WebsocketsEvent event, String data) {
