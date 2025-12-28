@@ -167,7 +167,7 @@ void clearMapping() {
 
 void printCmdList() {
   Serial.println("Available Commands:");
-  Serail.println(" CMD_GET_CONFIG - Get current configuration");
+  Serial.println(" CMD_GET_CONFIG - Get current configuration");
   Serial.println(" CMD_GET_DENSE_MODE - Get current RFID dense mode setting");
   Serial.println(" CMD_SET_DENSE_MODE:<0|1> - Set RFID dense mode (0=off, 1=on)");
   Serial.println(" CMD_GET_POWER - Get current RFID power level");
