@@ -35,27 +35,15 @@ jobs:
         run: |
           arduino-cli lib install "ArduinoWebsockets"
 
-      - name: Install ArduinoJson Library
+      - name: Install Libraries
         run: |
           arduino-cli lib install "ArduinoJson"
-
-      - name: Modify Sketch Defines
-        run: |
-          CONFIG_FILE="./RFID-Connector/RFID-Connector.ino" # Pfad Ino-File
-          echo "Passe ESP32-Definitionen in ${CONFIG_FILE} an..."
-
-          # Zeile '#define RFID_Connector_PCB_V1_0' aktivieren (entkommentieren, falls auskommentiert)
-          sed -i 's/^[[:space:]]*\/\/#[[:space:]]*define RFID_Connector_PCB_V1_0/#define RFID_Connector_PCB_V1_0/g' "${CONFIG_FILE}"
-          echo "-> '#define RFID_Connector_PCB_V1_0' aktiviert."
-
-          # Optional: Aenderungen im Log anzeigen
-          echo "Angepasster Sketch-Inhalt (Auszug Definitionen):"
-          grep -E "define RFID_Connector_PCB_V1_0" "${CONFIG_FILE}" || true
 
       - name: Compile ESP32 Sketch
         run: |
           # Define a clear build output directory
           BUILD_OUTPUT_DIR="build_output"
+          BOARD_OPTIONS="PartitionScheme=huge_app"
           
           arduino-cli compile --fqbn esp32:esp32:esp32 --build-path ${BUILD_OUTPUT_DIR} ./RFID-Connector/
 
