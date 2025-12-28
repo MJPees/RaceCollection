@@ -1,72 +1,59 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WebServer.h>
-#include <DNSServer.h>
-#include <Preferences.h>
 #include <ArduinoWebsockets.h> //ArduinoWebsockets 0.5.4
-#include <ArduinoJson.h>
+#include <WiFi.h>
+#include <Preferences.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <esp_mac.h>
+
+using namespace websockets;
 
 /* configuration */
 #define RFID_DEFAULT_POWER_LEVEL 26 // default power level
 #define DEFAULT_MIN_LAP_TIME 3000 //min time between laps in ms
-#define WIFI_AP_SSID "RFID-Connector-Config"
-#define WIFI_DEFAULT_HOSTNAME "rfid-connector"
-#define PREFERENCES_NAMESPACE "racebox"
+#define PREFERENCES_NAMESPACE "rfid_connector" // Max 15 chars for ESP32 NVS
 
-#define VERSION "1.5.0" // dont forget to update the releases.json
+/* BLE configuration */
+#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_RX_UUID "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_TX_UUID "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+#define WEBSOCKET_PING_INTERVAL 5000
+
+#define VERSION "2.0.0"
 //#define DEBUG
 
 //#define ESP32C3
 #define ESP32DEV
 
-//#define INVERT_LEDS
-//#define RFID_Connector_PCB_V1_0
-
 #ifdef ESP32DEV
   #define SerialRFID Serial2
-  #ifdef RFID_Connector_PCB_V1_0
-    #define RX_PIN 17
-    #define TX_PIN 16
-    #define RFID_LED_PIN 32
-    #define WEBSOCKET_LED_PIN 33
-    #define WIFI_AP_LED_PIN 25
-    #define PUSH_BUTTON_PIN 23
-  #else
-    #define RX_PIN 16
-    #define TX_PIN 17
-    #ifdef INVERT_LEDS
-      #define RFID_LED_PIN 32
-      #define WEBSOCKET_LED_PIN 33
-      #define WIFI_AP_LED_PIN 25
-      #define PUSH_BUTTON_PIN 23
-    #else
-      #define RFID_LED_PIN 2
-      #define WEBSOCKET_LED_PIN 4
-      #define WIFI_AP_LED_PIN 25
-      #define PUSH_BUTTON_PIN 23
-    #endif
-  #endif
+  #define RX_PIN 17
+  #define TX_PIN 16
+  #define RFID_LED_PIN 32
+  #define BLE_LED_PIN 33
+  #define WEBSOCKET_LED_PIN 25
+  #define PUSH_BUTTON_PIN 23
 #elif defined(ESP32C3)
   HardwareSerial SerialRFID(1);
   #define RX_PIN 5
   #define TX_PIN 6
   #define RFID_LED_PIN 8
-  #define WEBSOCKET_LED_PIN 9
-  #define WIFI_AP_LED_PIN 10
+  #define BLE_LED_PIN 9
+  #define WEBSOCKET_LED_PIN 10
 #endif
 
-#define WIFI_CONNECT_ATTEMPTS 10
-#define WIFI_CONNECT_DELAY_MS 1000
-#define WEBSOCKET_PING_INTERVAL 5000
 #define RFID_LED_ON_TIME 200
 
-#define RFID_REPEAT_TIME 3000
 #define RFID_RESTART_TIME 300000
 #define RFID_MAX_COUNT 30 // max für freies Fahren laut Carrera
-#define RFID_SMARTRACE_MAX_COUNT 8
-#define RFID_STORAGE_COUNT 2
+#define RFID_MAX_MAPPING_COUNT 30 // max number of tag to id mappings
 
 #define debounceDelay 50
+
+const String bleName = "RFID-Connector";
 
 const unsigned char ReadMulti[10] = {0XAA,0X00,0X27,0X00,0X03,0X22,0XFF,0XFF,0X4A,0XDD};
 const unsigned char StopReadMultiResponse[8] = {0xAA,0x01,0x28,0x00,0x01,0x00,0x2A,0xDD};
@@ -109,7 +96,7 @@ unsigned int parameterLength = 0;
 unsigned int crc = 0;
 unsigned int dataCheckSum = 0;
 
-unsigned char epcBytes[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
+unsigned char epcBytes[12] = {};
 String lastEpcString = "";
 unsigned long lastEpcRead = 0;
 unsigned long lastRestart = 0;
@@ -121,648 +108,563 @@ bool buttonWasPressed = false;
 
 int minLapTime = DEFAULT_MIN_LAP_TIME;
 
-bool wifiApMode = false;
-bool webserverRunning = false;
-
-using namespace websockets;
-String websocketServer = "";
-String websocketCaCert = "";
-bool websocketConnected = false;
-unsigned long websocketLastPing = 0;
-unsigned long websocketLastAttempt = 0;
-unsigned long websocketBackoff = 1000; // Start mit 1 Sekunde
-const unsigned long websocketMaxBackoff = 30000; // Maximal 30 Sekunden
-WebsocketsClient client;
-
-WebServer server(80);
-DNSServer dnsServer;
-
 Preferences preferences;
-
-String targetSystem;
-String wifiSsid;
-String wifiPassword;
-String wifiHostname;
-
-String smartRaceWebsocketServer;
-
-String chRacingClubWebsocketServer;
-String chRacingClubCaCert;
-String chRacingClubApiKey;
 
 int rfidPowerLevel = RFID_DEFAULT_POWER_LEVEL;
 bool rfidDenseMode = true;
-int newEpcId = 1;
+
+struct mapping_data {
+  char tagId[32] = "";
+  char mappedId[32] = "";
+};
+
+mapping_data mappings[RFID_MAX_MAPPING_COUNT];
 
 struct rfid_data {
-  String id[RFID_STORAGE_COUNT];
-  String name;
+  String tagId;
+  String mappedId = "";
   unsigned long last;
 };
 rfid_data rfids[RFID_MAX_COUNT];
 
-unsigned long lastResetTime = 0;
+String wifiSsid = "";
+String wifiPassword = "";
+String wifiHostname = "RFID-Connector";
 
+WebsocketsClient *websocketClient = nullptr;
+String websocketServer = "";
+unsigned long websocketLastPing = 0;
+bool websocketWasConnected = false;
 
-void configurationSave() {
-  preferences.putString("target_system", targetSystem);
-  preferences.putInt("power_level", rfidPowerLevel);
-  preferences.putBool("rfid_dense_mode", rfidDenseMode);
-  preferences.putInt("min_lap_time", minLapTime);
+/* BLE variables */
+BLEServer* pServer = NULL;
+BLECharacteristic* pTxCharacteristic = NULL;
+BLECharacteristic* pRxCharacteristic = NULL;
+volatile bool bleConnected = false;
 
-  preferences.putString("wifi_ssid", wifiSsid);
-  preferences.putString("wifi_password", wifiPassword);
-  preferences.putString("wifi_hostname", wifiHostname);
+String serial_usb_command_data = "";
 
-  preferences.putString("sr_ws_server", smartRaceWebsocketServer);
-
-  preferences.putString("chrc_ws_server", chRacingClubWebsocketServer);
-  preferences.putString("chrc_ws_ca_cert", chRacingClubCaCert);
-  preferences.putString("chrc_api_key", chRacingClubApiKey);
-
-  if (targetSystem == "smart_race") {
-    char key[20];
-    for(int i=0; i<RFID_SMARTRACE_MAX_COUNT; i++) {
-      snprintf(key, sizeof(key), "RFID%d", i);
-      preferences.putString(key, rfids[i].name);
-      for(int j=0; j<RFID_STORAGE_COUNT; j++) {
-        snprintf(key, sizeof(key), "RFID%d_%d", i, j);
-        preferences.putString(key, rfids[i].id[j]);
-      }
-    }
+void ledOn(const int led_pin) {
+  digitalWrite(led_pin, LOW);
+  if(led_pin == RFID_LED_PIN) {
+    RfidLedOnMs = millis();
   }
 }
 
-void loadRfidStorage() {
-  char key[20];
-  char defaultName[20];
-  for(int i=0; i<RFID_SMARTRACE_MAX_COUNT; i++) {
-    snprintf(key, sizeof(key), "RFID%d", i);
-    snprintf(defaultName, sizeof(defaultName), "Controller %d", i+1);
-    rfids[i].name = preferences.getString(key, defaultName);
-    for(int j=0; j<RFID_STORAGE_COUNT; j++) {
-      snprintf(key, sizeof(key), "RFID%d_%d", i, j);
-      rfids[i].id[j] = preferences.getString(key, "");
+void ledOff(const int led_pin) {
+  digitalWrite(led_pin, HIGH);
+  if(led_pin == RFID_LED_PIN) {
+    RfidLedOnMs = 0;
+  }
+}
+
+void clearMapping() {
+  for (int i = 0; i < RFID_MAX_MAPPING_COUNT; i++) {
+    mappings[i].tagId[0] = '\0';
+    mappings[i].mappedId[0] = '\0';
+  }
+}
+
+void printCmdList() {
+  Serial.println("Available Commands:");
+  Serail.println(" CMD_GET_CONFIG - Get current configuration");
+  Serial.println(" CMD_GET_DENSE_MODE - Get current RFID dense mode setting");
+  Serial.println(" CMD_SET_DENSE_MODE:<0|1> - Set RFID dense mode (0=off, 1=on)");
+  Serial.println(" CMD_GET_POWER - Get current RFID power level");
+  Serial.println(" CMD_SET_POWER:<level> - Set RFID power level (10-26 dBm)");
+  Serial.println(" CMD_GET_MIN_LAP_TIME - Get minimum lap time setting");
+  Serial.println(" CMD_SET_MIN_LAP_TIME:<ms> - Set minimum lap time in milliseconds");
+  Serial.println(" CMD_SET_MAPPING:<tag_id>,<mapped_id|controller_id> - Set mapping from tag ID to mapped ID or controller ID");
+  Serial.println(" CMD_REMOVE_MAPPING:<tag_id> - Remove mapping for specified tag ID");
+  Serial.println(" CMD_GET_MAPPINGS - Get all current tag ID to mapped ID mappings");
+  Serial.println(" CMD_CLEAR_MAPPINGS - Clear all tag ID to mapped ID mappings");
+  Serial.println(" CMD_GET_WIFI - Get current WiFi SSID and password");
+  Serial.println(" CMD_SET_WIFI:<ssid>,<password> - Set WiFi SSID and password");
+  Serial.println(" CMD_GET_WEBSOCKET_SERVER - Get Websocket server URL");
+  Serial.println(" CMD_SET_WEBSOCKET_SERVER:<url> - Set Websocket server URL");
+  Serial.println(" CMD_SAVE_SETTINGS - Save current settings to flash");
+  Serial.println(" CMD_RESET_RFID_STORAGE - Reset RFID tag storage");
+  Serial.println(" CMD_WRITE_RFID:<[1:255]> - Write new RFID tag with specified ID (last byte)");
+  Serial.println(" CMD_REBOOT - Reboot device");
+  Serial.println(" CMD_GET_VERSION - Get firmware version");
+  Serial.println("############################");
+}
+
+void getDenseModeResponse(bool fromBle = false) {
+  String response = rfidDenseMode ? "MSG_GET_DENSE_MODE:1" : "MSG_GET_DENSE_MODE:0";
+  Serial.println(response);
+  if(fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+void getPowerLevelResponse(bool fromBle = false) {
+  String response = "MSG_GET_POWER:" + String(rfidPowerLevel);
+  Serial.println(response);
+  if(fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+void getMinLapTimeResponse(bool fromBle = false) {
+  String response = "MSG_GET_MIN_LAP_TIME:" + String(minLapTime);
+  Serial.println(response);
+  if(fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+void getMappingResponse(bool fromBle = false) {
+  for (int i = 0; i < RFID_MAX_COUNT; i++) {
+    if(rfids[i].tagId != "" && rfids[i].mappedId == "") {
+      String response = "MSG_MAPPING:" + rfids[i].tagId + "," + rfids[i].tagId;
+      Serial.println(response);
+      if (fromBle) {
+        sendBleResponse(response);
+        wait(50); // small wait to ensure BLE notifications are sent in order
+      }
     }
   }
+  for (int i = 0; i < RFID_MAX_MAPPING_COUNT; i++) {
+    if (mappings[i].tagId[0] != '\0') {
+      char buffer[128]; // Groß genug für Befehl + Tag + Map
+      snprintf(buffer, sizeof(buffer), "MSG_GET_MAPPING:%s,%s", mappings[i].tagId, mappings[i].mappedId);
+      String response = String(buffer);
+      Serial.println(response);
+      if (fromBle) {
+        sendBleResponse(response);
+        wait(50); // small wait to ensure BLE notifications are sent in order
+      }
+    }
+  }
+  String response = "MSG_GET_MAPPINGS_END:OK";
+  Serial.println(response);
+  if (fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+void getWifiResponse(bool fromBle = false) {
+  String response = "MSG_GET_WIFI:" + wifiSsid + "," + wifiPassword;
+  Serial.println(response);
+  if (fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+void getWebsocketResponse(bool fromBle = false) {
+  String response = "MSG_GET_WEBSOCKET_SERVER:" + websocketServer;
+  Serial.println(response);
+  if (fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+void getVersionResponse(bool fromBle = false) {
+  String response = "MSG_GET_VERSION:" + String(VERSION);
+  Serial.println(response);
+  if (fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+void processCommands(String command, bool fromBle = false) {
+  if (command.equalsIgnoreCase("CMD_GET_DENSE_MODE")) {
+    getDenseModeResponse(fromBle);
+  }
+  else if (command.indexOf("CMD_SET_DENSE_MODE:") >= 0) {
+    int separatorIndex = command.indexOf(':');
+    String denseModeString = command.substring(separatorIndex + 1);
+    denseModeString.trim();
+    if (denseModeString.equalsIgnoreCase("1")) {
+      rfidSetDensitivityMode(true);
+    } else {
+      rfidSetDensitivityMode(false);
+    }
+    String response = "MSG_SET_DENSE_MODE:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+  }
+  else if (command.equalsIgnoreCase("CMD_GET_POWER")) {
+    getPowerLevelResponse(fromBle);
+  }
+  else if (command.indexOf("CMD_SET_POWER:") >= 0) {
+    int separatorIndex = command.indexOf(':');
+    String powerLevelString = command.substring(separatorIndex + 1);
+    powerLevelString.trim();
+    rfidSetPowerLevel(powerLevelString.toInt());
+    String response = "MSG_SET_POWER:OK";
+    Serial.println(response);
+    if (fromBle && bleConnected && pTxCharacteristic != NULL) {
+      pTxCharacteristic->setValue(response.c_str());
+      pTxCharacteristic->notify();
+    }
+  }
+  else if (command.equalsIgnoreCase("CMD_GET_MIN_LAP_TIME")) {
+    getMinLapTimeResponse(fromBle);
+  }  
+  else if (command.indexOf("CMD_SET_MIN_LAP_TIME:") >= 0) {
+    int separatorIndex = command.indexOf(':');
+    String minLapTimeString = command.substring(separatorIndex + 1);
+    minLapTimeString.trim();
+    minLapTime = minLapTimeString.toInt();
+    String response = "MSG_SET_MIN_LAP_TIME:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+  }
+  else if (command.equalsIgnoreCase("CMD_REBOOT")) {
+    String response = "MSG_REBOOT:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+    restartEsp32();
+  }
+  else if(command.indexOf("CMD_SET_MAPPING:") >= 0) {
+    int separatorIndex = command.indexOf(':');
+    String mappingData = command.substring(separatorIndex + 1);
+    mappingData.trim();
+    int commaIndex = mappingData.indexOf(',');
+    if (commaIndex > 0) {
+      String tagId = mappingData.substring(0, commaIndex);
+      String mappedId = mappingData.substring(commaIndex + 1);
+      tagId.trim();
+      mappedId.trim();
+      // Use optimized search to find or update mapping
+      int mappingIdx = findMappingByTagId(tagId);
+      if (mappingIdx >= 0) {
+        // Mapping exists, update it
+        strncpy(mappings[mappingIdx].mappedId, mappedId.c_str(), sizeof(mappings[mappingIdx].mappedId) - 1);
+        // WICHTIG: Manuell Null-Terminator setzen, falls der String zu lang war
+        mappings[mappingIdx].mappedId[sizeof(mappings[mappingIdx].mappedId) - 1] = '\0';
+      } else {
+        // Mapping doesn't exist, find empty slot
+        int emptyIdx = findFirstEmptyMapping();
+        if (emptyIdx >= 0) {
+          strncpy(mappings[emptyIdx].tagId, tagId.c_str(), sizeof(mappings[emptyIdx].tagId) - 1);
+          // WICHTIG: Manuell Null-Terminator setzen, falls der String zu lang war
+          mappings[emptyIdx].tagId[sizeof(mappings[emptyIdx].tagId) - 1] = '\0';
+          strncpy(mappings[emptyIdx].mappedId, mappedId.c_str(), sizeof(mappings[emptyIdx].mappedId) - 1);
+          // WICHTIG: Manuell Null-Terminator setzen, falls der String zu lang war
+          mappings[emptyIdx].mappedId[sizeof(mappings[emptyIdx].mappedId) - 1] = '\0';
+        }
+      }
+      String response = "MSG_SET_MAPPING:OK";
+      Serial.println(response);
+      if (fromBle) {
+        sendBleResponse(response);
+      }
+    }
+  }
+  else if(command.indexOf("CMD_REMOVE_MAPPING:") >= 0) {
+    int separatorIndex = command.indexOf(':');
+    String tagId = command.substring(separatorIndex + 1);
+    tagId.trim();
+    int mappingIdx = findMappingByTagId(tagId);
+    if (mappingIdx >= 0) {
+      mappings[mappingIdx].tagId[0] = '\0';
+      mappings[mappingIdx].mappedId[0] = '\0';
+    }
+    String response = "MSG_REMOVE_MAPPING:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+  }
+  else if(command.equalsIgnoreCase("CMD_GET_MAPPINGS")) {
+    getMappingResponse(fromBle);
+  }
+  else if(command.equalsIgnoreCase("CMD_CLEAR_MAPPINGS")) {
+    clearMapping();
+    String response = "MSG_CLEAR_MAPPINGS:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+  }
+  else if(command.equalsIgnoreCase("CMD_GET_WIFI")) {
+    getWifiResponse(fromBle);
+  }
+  else if(command.indexOf("CMD_SET_WIFI:") >= 0) {
+    int separatorIndex = command.indexOf(':');
+    String ssidData = command.substring(separatorIndex + 1);
+    ssidData.trim();
+    int commaIndex = ssidData.indexOf(',');
+    if (commaIndex > 0) {
+      wifiSsid = ssidData.substring(0, commaIndex);
+      wifiPassword = ssidData.substring(commaIndex + 1);
+      wifiSsid.trim();
+      wifiPassword.trim();
+      // Here you would save the SSID and password to preferences or a config file
+      String response = "MSG_SET_WIFI:OK";
+      Serial.println(response);
+      if (fromBle) {
+        sendBleResponse(response);
+      }
+    }
+  }
+  else if(command.equalsIgnoreCase("CMD_GET_WEBSOCKET_SERVER")) {
+    getWebsocketResponse(fromBle);
+  }
+  else if(command.indexOf("CMD_SET_WEBSOCKET_SERVER:") >= 0) {
+    int separatorIndex = command.indexOf(':');
+    String urlData = command.substring(separatorIndex + 1);
+    urlData.trim();
+    if (urlData.length() > 0) {
+      websocketServer = urlData;
+      if (websocketServer.startsWith("ws://") == false && websocketServer.startsWith("wss://") == false) {
+        websocketServer = "ws://" + websocketServer;
+      }
+      String response = "MSG_SET_WEBSOCKET_SERVER:OK";
+      Serial.println(response);
+      if (fromBle) {
+        sendBleResponse(response);
+      }
+    }
+  }
+  else if(command.equalsIgnoreCase("CMD_RESET_RFID_STORAGE")) {
+    resetRfidStorage();
+    String response = "MSG_RESET_RFID_STORAGE:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+  }
+  else if(command.indexOf("CMD_WRITE_RFID:") >= 0) {
+    int separatorIndex = command.indexOf(':');
+    String rfidId = command.substring(separatorIndex + 1);
+    rfidId.trim();
+    int lastByte = rfidId.toInt();
+    if (lastByte < 0| lastByte > 255) {
+      String response = "MSG_WRITE_RFID:ERROR";
+      Serial.println(response);
+      if (fromBle) {
+        sendBleResponse(response);
+      }
+      return;
+    }
+    setReaderSetting(StopReadMulti, 7, StopReadMultiResponse, 8);
+    wait(100);
+    bool writeResult = writeRfidEpc(lastByte);
+    String response = writeResult ? "MSG_WRITE_RFID:OK" : "MSG_WRITE_RFID:ERROR";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+    SerialRFID.write(ReadMulti,10);
+  }
+  else if(command.equalsIgnoreCase("CMD_SAVE_SETTINGS")) {
+    configurationSave();
+    String response = "MSG_SAVE_SETTINGS:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+  }
+  else if(command.equalsIgnoreCase("CMD_GET_CONFIG")) {
+    getWifiResponse(fromBle);
+    getWebsocketResponse(fromBle);
+    getDenseModeResponse(fromBle);
+    getPowerLevelResponse(fromBle);
+    getMinLapTimeResponse(fromBle);
+    getMappingResponse(fromBle);
+    getVersionResponse(fromBle);
+    String response = "MSG_GET_CONFIG:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
+    }
+  }
+  else if(command.equalsIgnoreCase("CMD_GET_VERSION")) {
+    getVersionResponse(fromBle);
+  }
+  else {
+    Serial.println("Unknown command: " + command);
+  }
+}
+
+// BLE Server Callbacks
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      bleConnected = true;
+      Serial.println("BLE: client connected");
+      ledOn(BLE_LED_PIN);
+    }
+    void onDisconnect(BLEServer* pServer) {
+      bleConnected = false;
+      Serial.println("BLE: client disconnected");
+      ledOff(BLE_LED_PIN);
+      pServer->startAdvertising(); // Restart advertising on disconnect
+    }
+};
+
+class MyRxCharacteristicCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      String rxData = pCharacteristic->getValue();
+      // Validate BLE input length to prevent buffer overflow
+      if (rxData.length() > 0 && rxData.length() <= 256) {
+        // Process BLE command just like serial commands
+        rxData.trim();
+        processCommands(rxData, true);
+      }
+    }
+};
+
+
+// Function declarations
+
+void sendBleResponse(const String &response) {
+  if (bleConnected && pTxCharacteristic != NULL) {
+    pTxCharacteristic->setValue(response.c_str());
+    pTxCharacteristic->notify();
+  }
+}
+
+void sendBleResponse(const char *response) {
+  if (bleConnected && pTxCharacteristic != NULL) {
+    pTxCharacteristic->setValue(response);
+    pTxCharacteristic->notify();
+  }
+}
+
+int findMappingByTagId(const String &tagId) {
+  for (int i = 0; i < RFID_MAX_MAPPING_COUNT; i++) {
+    // strcmp gibt 0 zurück, wenn beide Zeichenketten identisch sind
+    if (strcmp(mappings[i].tagId, tagId.c_str()) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+int findFirstEmptyMapping() {
+  for (int i = 0; i < RFID_MAX_MAPPING_COUNT; i++) {
+    // Ein Slot ist leer, wenn das erste Zeichen der Null-Terminator ist
+    if (mappings[i].tagId[0] == '\0') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+void configurationSave() {
+  preferences.putString("wifi_ssid", wifiSsid);
+  preferences.putString("wifi_password", wifiPassword);
+  preferences.putString("websocket", websocketServer);
+  preferences.putBool("rfid_dense_mode", rfidDenseMode);
+  preferences.putInt("power_level", rfidPowerLevel);
+  preferences.putInt("min_lap_time", minLapTime);
+  preferences.putBytes("map_block", mappings, sizeof(mappings));
+  Serial.println("Konfiguration und alle Mappings wurden gespeichert.");
 }
 
 void configurationLoad() {
-  targetSystem = preferences.getString("target_system", "smart_race");
+  wifiSsid = preferences.getString("wifi_ssid", "");
+  wifiPassword = preferences.getString("wifi_password", "");
+  websocketServer = preferences.getString("websocket", "");
   rfidDenseMode = preferences.getBool("rfid_dense_mode", true);
   rfidPowerLevel = preferences.getInt("power_level", RFID_DEFAULT_POWER_LEVEL);
   minLapTime = preferences.getInt("min_lap_time", DEFAULT_MIN_LAP_TIME);
-
-  wifiSsid = preferences.getString("wifi_ssid", "");
-  wifiPassword = preferences.getString("wifi_password", "");
-  wifiHostname = preferences.getString("wifi_hostname", WIFI_DEFAULT_HOSTNAME);
-
-  smartRaceWebsocketServer = preferences.getString("sr_ws_server", "");
-
-  chRacingClubWebsocketServer = preferences.getString("chrc_ws_server", "");
-  chRacingClubCaCert = preferences.getString("chrc_ws_ca_cert", "");
-  chRacingClubApiKey = preferences.getString("chrc_api_key", "");
-
-  if (targetSystem == "smart_race") {
-    websocketServer = smartRaceWebsocketServer;
-    websocketCaCert = "";
-    loadRfidStorage();
-
-    Serial.println("\nConfiguration: RFID-Connector loaded");
-  }
-
-  if (targetSystem == "ch_racing_club") {
-    websocketServer = chRacingClubWebsocketServer;
-    websocketCaCert = chRacingClubCaCert;
-    resetRfidStorage();
-
-    Serial.println("\nConfiguration: CH Racing Club loaded");
-  }
-}
-
-void handleNotFound() {
-  server.sendHeader("Location", "/");
-  server.send(302, "text/plain", "redirect to configuration page");
-}
-
-void handleRoot() {
-  String html = "<!DOCTYPE html><html><head><title>RFID-Connector</title>";
-  html += "<meta charset='UTF-8'>"; // Specify UTF-8 encoding
-  html += "<style>";
-  html += "*, *::before, *::after {box-sizing: border-box;}";
-  html += "body {min-height: 100vh;margin: 0;}";
-  html += "form {max-width: 535px;margin: 0 auto;}";
-  html += "label {margin-bottom: 5px;display:block;}";
-  html += "input[type=text],input[type=password],input[type=number],select,textarea {width: 100%;padding: 8px;border: 1px solid #ccc;border-radius: 4px;display: block;}";
-  html += "input[type=submit] {width: 100%;background-color: #4CAF50;color: white;padding: 10px 15px;border: none;border-radius: 4px;}";
-  html += ".checkbox-container { display: flex; align-items: center; gap: 5px; }";
-  html += "</style>";
-  html += "<script src='https://unpkg.com/alpinejs' defer></script>";
-  html += "</head><body>";
-  html += "<form x-data=\"{ targetSystem: '" + targetSystem + "', smartRaceWebsocketServer: '" + smartRaceWebsocketServer + "', racingClubWebsocketServer: '" + chRacingClubWebsocketServer + "' }\" action='/config' method='POST'>";
-  html += "<h1 align=center>RFID-Connector</h1>";
-  html += "<div style=\"text-align: center; margin-bottom:20px;\">";
-  html += "<a href=\"http://" + wifiHostname + "/label-writer\">Label Writer</a><br>";
-  html += "</div>";
-
-  html += "<label for='wifi_ssid'>SSID:</label>";
-  html += "<input type='text' id='wifi_ssid' name='wifi_ssid' value='" + wifiSsid + "'><br>";
-
-  html += "<label for='wifi_password'>Passwort:</label>";
-  html += "<input type='password' id='wifi_password' name='wifi_password' value='" + wifiPassword + "'><br>";
-
-  html += "<label for='wifi_hostname'>Hostname:</label>";
-  html += "<input type='text' id='wifi_hostname' name='wifi_hostname' value='" + wifiHostname + "'><br>";
-
-  if (!wifiApMode) {
-    html += "<label for='target_system'>Target System:</label>";
-    html += "<select id='target_system' name='target_system' x-model='targetSystem'>";
-    html += "<option value='smart_race'" + String((targetSystem == "smart_race") ? " selected" : "") + ">SmartRace</option>";
-    html += "<option value='ch_racing_club'" + String((targetSystem == "ch_racing_club") ? " selected" : "") + ">CH Racing Club</option>";
-    html += "</select><br>";
-
-    html += "<div x-show=\"targetSystem == 'ch_racing_club'\">";
-    html += "  <label for='ch_racing_club_websocket_server'>Websocket Server CH-Racing-Club:</label>";
-    html += "  <input type='text' id='ch_racing_club_websocket_server' name='ch_racing_club_websocket_server' placeholder='ws:// or wss://' x-model='racingClubWebsocketServer' value='" + chRacingClubWebsocketServer + "'><br>";
-    html += "  <div x-show=\"racingClubWebsocketServer.startsWith('wss')\">";
-    html += "    <label for='ch_racing_club_websocket_ca_cert'>Websocket SSL CA Certificate (PEM) CH-Racing-Club:</label>";
-    html += "    <textarea id='ch_racing_club_websocket_ca_cert' name='ch_racing_club_websocket_ca_cert' rows='12' cols='64' style='font-family:monospace;width:100%;'>" + chRacingClubCaCert + "</textarea><br>";
-    html += "  </div>";
-    html += "  <label for='ch_racing_club_api_key'>ApiKey CH-Racing-Club:</label>";
-    html += "  <input type='text' id='ch_racing_club_api_key' name='ch_racing_club_api_key' value='" + chRacingClubApiKey + "'><br>";
-    html += "</div>";
-
-    html += "<div x-show=\"targetSystem == 'smart_race'\">";
-    html += "  <label for='smart_race_websocket_server'>Websocket Server SmartRace:</label>";
-    html += "  <input type='text' id='smart_race_websocket_server' name='smart_race_websocket_server' placeholder='ws://' x-model='smartRaceWebsocketServer' value='" + smartRaceWebsocketServer + "'><br>";
-    html += "</div>";
-
-    html += "<label for='min_lap_time'>Minimum Lap Time (ms):</label>";
-    html += "<input type='number' id='min_lap_time' name='min_lap_time' value='" + String(minLapTime) + "'><br>";
-
-    html += "<label for='rfid_power_level'>Power Level:</label>";
-    html += "<select id='rfid_power_level' name='rfid_power_level'>";
-    html += "<option value='10'" + String((rfidPowerLevel == 10) ? " selected" : "") + ">10 dBm</option>";
-    html += "<option value='11'" + String((rfidPowerLevel == 11) ? " selected" : "") + ">11 dBm</option>";
-    html += "<option value='12'" + String((rfidPowerLevel == 12) ? " selected" : "") + ">12 dBm</option>";
-    html += "<option value='13'" + String((rfidPowerLevel == 13) ? " selected" : "") + ">13 dBm</option>";
-    html += "<option value='14'" + String((rfidPowerLevel == 14) ? " selected" : "") + ">14 dBm</option>";
-    html += "<option value='15'" + String((rfidPowerLevel == 15) ? " selected" : "") + ">15 dBm</option>";
-    html += "<option value='16'" + String((rfidPowerLevel == 16) ? " selected" : "") + ">16 dBm</option>";
-    html += "<option value='17'" + String((rfidPowerLevel == 17) ? " selected" : "") + ">17 dBm</option>";
-    html += "<option value='18'" + String((rfidPowerLevel == 18) ? " selected" : "") + ">18 dBm</option>";
-    html += "<option value='19'" + String((rfidPowerLevel == 19) ? " selected" : "") + ">19 dBm</option>";
-    html += "<option value='20'" + String((rfidPowerLevel == 20) ? " selected" : "") + ">20 dBm</option>";
-    html += "<option value='21'" + String((rfidPowerLevel == 21) ? " selected" : "") + ">21 dBm</option>";
-    html += "<option value='22'" + String((rfidPowerLevel == 22) ? " selected" : "") + ">22 dBm</option>";
-    html += "<option value='23'" + String((rfidPowerLevel == 23) ? " selected" : "") + ">23 dBm</option>";
-    html += "<option value='24'" + String((rfidPowerLevel == 24) ? " selected" : "") + ">24 dBm</option>";
-    html += "<option value='25'" + String((rfidPowerLevel == 25) ? " selected" : "") + ">25 dBm</option>";
-    html += "<option value='26'" + String((rfidPowerLevel == 26) ? " selected" : "") + ">26 dBm</option>";
-    html += "</select><br>";
-    html += "<div class='checkbox-container'>";
-    html += "<label for='dense_mode'>Use RFID-Dense-Mode:</label>";
-    if (rfidDenseMode) {
-      html += "<input type='checkbox' id='dense_mode' name='dense_mode' checked>";
-    } else {
-      html += "<input type='checkbox' id='dense_mode' name='dense_mode'>";
-    }
-    html += "</div><br>";
-  }
-
-  html += "<input type='submit' style='margin-bottom:20px;' value='Speichern'>";
-  if (!wifiApMode && targetSystem == "smart_race") {
-    html += "<div style='display: grid; grid-template-columns: 1fr; gap: 5px;'>"; // Äußerer Grid-Container
-    for (int i = 0; i < RFID_SMARTRACE_MAX_COUNT; i++) {
-        html += "<div style='border: 3px solid black; padding: 10px; margin: 5px; display: grid; grid-template-columns: 1fr; gap: 5px;'>"; // Rahmen mit Grid-Spalte
-        html += "<div style='display: grid; grid-template-columns: auto 1fr; align-items: center;'>"; // Grid für Name
-        html += "<label for='name" + String(i) + "'>Name:</label>";
-        html += "<input type='text' maxlength='100' style='width:auto; margin-left: 4px;' id='name" + String(i) + "' name='name" + String(i) + "' value='" + rfids[i].name + "'>";
-        html += "</div>";
-        html += "<div style='display: grid; grid-template-columns: repeat(" + String(RFID_STORAGE_COUNT * 2) + ", auto); align-items: center;'>"; // Grid für horizontale IDs
-        for(int j = 0; j < RFID_STORAGE_COUNT; j++){
-          if(j>0) {
-            html += "<label style='margin-left: 4px;' for='id" + String(i) + "_" + String(j) + "'>ID" + String(j+1) + ":</label>";
-          }
-          else {
-            html += "<label for='id" + String(i) + "_" + String(j) + "'>ID" + String(j+1) + ":</label>";
-          }
-          html += "<input type='text' style='width:auto; margin-left: 4px;' id='id" + String(i) + "_" + String(j) + "' name='id" + String(i) + "_" + String(j) + "' value='" + rfids[i].id[j] + "'>";
-        }
-        html += "</div>"; // Ende Container für horizontale IDs
-        html += "</div>";
-    }
-    html += "</div>"; // Ende äußerer Grid-Container
-  }
-  html += "</form>";
-  html += "</body></html>";
-  server.send(200, "text/html", html);
-}
-
-void handleLabelWriter() {
-  String html = "<!DOCTYPE html><html><head><title>Label-Writer</title>";
-  html += "<meta charset='UTF-8'>"; // Specify UTF-8 encoding
-  html += "<style>";
-  html += "*, *::before, *::after {box-sizing: border-box;}";
-  html += "body {min-height: 100vh;margin: 0;}";
-  html += "form {max-width: 250px;margin: 0 auto;}";
-  html += "label {margin-bottom: 5px;display:block;}";
-  html += "input[type=text],input[type=password],input[type=number],select,textarea {width: 100%;padding: 8px;border: 1px solid #ccc;border-radius: 4px;display: block;}";
-  html += "input[type=submit] {width: 100%;background-color: #4CAF50;color: white;padding: 10px 15px;border: none;border-radius: 4px;}";
-  html += ".checkbox-container { display: flex; align-items: center; gap: 5px; }";
-  html += "</style>";
-  html += "</head><body>";
-  html += "<form action='/write-epc' method='POST'>";
-  html += "<h1 align=center>Label-Writer</h1>";
-  html += "<div style=\"text-align: center; margin-bottom:20px;\">";
-  html += "<a href=\"http://" + wifiHostname + "\">RFID-Connector</a><br>";
-  html += "</div>";
-  html += "<label for='new_epc_id'>New EPC:</label>";
-  html += "<input type='number' id='new_epc_id' name='new_epc_id' value=" + String(newEpcId) +" min='0' max='255'><br>";
-  html += "<input type='submit' style='margin-bottom:20px;' value='write EPC'>";
-  html += "</form>";
-  html += "</body></html>";
-  server.send(200, "text/html", html);
-}
-
-void handleWriteEpc() {
-  if (server.hasArg("new_epc_id")) {
-    int newEpcId = server.arg("new_epc_id").toInt();
-    if (newEpcId >= 0 && newEpcId <= 255) {
-      if(writeRfidEpc(newEpcId)) {
-        server.send(200, "text/html", "<!DOCTYPE html><html><head><title>Label-Writer</title></head><body><h1 align=center>EPC ID updated successfully.</h1><p>You will be redirected in 2 seconds.</p><script>setTimeout(function() { window.location.href = 'http://" + wifiHostname + "/label-writer'; }, 2000);</script></body></html>");
-      }
-      else {
-        server.send(200, "text/html", "<!DOCTYPE html><html><head><title>Label-Writer</title></head><body><h1 align=center>Could not write EPC ID.</h1><p>You will be redirected in 2 seconds.</p><script>setTimeout(function() { window.location.href = 'http://" + wifiHostname + "/label-writer'; }, 2000);</script></body></html>");
-      }
-    } else {
-      server.send(200, "text/html", "<!DOCTYPE html><html><head><title>Label-Writer</title></head><body><h1 align=center>Invalid EPC ID. Must be between 0 and 255.</h1><p>You will be redirected in 2 seconds.</p><script>setTimeout(function() { window.location.href = 'http://" + wifiHostname + "/label-writer'; }, 2000);</script></body></html>");
-    }
+  size_t storedSize = preferences.getBytesLength("map_block");
+  if (storedSize == sizeof(mappings)) {
+    preferences.getBytes("map_block", mappings, sizeof(mappings));
+    Serial.println("RFID Mappings erfolgreich als Block geladen.");
   } else {
-    server.send(200, "text/html", "<!DOCTYPE html><html><head><title>Label-Writer</title></head><body><h1 align=center>No EPC ID provided.</h1><p>You will be redirected in 2 seconds.</p><script>setTimeout(function() { window.location.href = 'http://" + wifiHostname + "/label-writer'; }, 2000);</script></body></html>");
+    // Falls noch nichts gespeichert wurde oder die Größe nicht passt: Arrays leeren
+    clearMapping();
+    Serial.println("Keine gültigen Mappings gefunden, Speicher initialisiert.");
   }
-}
-
-void handleConfig() {
-  if (server.args() > 0) {
-    if(setReaderSetting(StopReadMulti, 7, StopReadMultiResponse, 8)) {
-      Serial.println("RFID: stopped ReadMulti.");
-    } else {
-      Serial.println("RFID: failed to stop ReadMulti.");
-    }
-    bool reConnectWifi = wifiSsid != server.arg("wifi_ssid") || wifiPassword != server.arg("wifi_password") || wifiHostname != server.arg("wifi_hostname");
-    bool reConnectWebsocket = false;
-
-    wifiSsid = server.arg("wifi_ssid");
-    wifiPassword = server.arg("wifi_password");
-    wifiHostname = server.arg("wifi_hostname");
-
-    if(!wifiApMode) {
-      reConnectWebsocket = targetSystem != server.arg("target_system");
-
-      if (server.hasArg("dense_mode")) {
-        rfidDenseMode = true;
-      } else {
-          rfidDenseMode = false;
-      }
-      targetSystem = server.arg("target_system");
-      rfidPowerLevel = server.arg("rfid_power_level").toInt();
-      minLapTime = server.arg("min_lap_time").toInt();
-      if (targetSystem == "smart_race") {
-        if (smartRaceWebsocketServer != server.arg("smart_race_websocket_server")) {
-          reConnectWebsocket = true; // Reconnect if the server has changed
-          smartRaceWebsocketServer = server.arg("smart_race_websocket_server");
-        }
-        websocketServer = smartRaceWebsocketServer;
-        websocketCaCert = ""; // SmartRace does not use a CA cert
-        if (reConnectWebsocket == true) {
-          loadRfidStorage();
-        }
-        else {
-          char nameKey[12];
-          char idKey[16];
-          for (int i = 0; i < RFID_SMARTRACE_MAX_COUNT; i++) {
-            snprintf(nameKey, sizeof(nameKey), "name%d", i);
-            rfids[i].name = server.arg(nameKey);
-            for (int j = 0; j < RFID_STORAGE_COUNT; j++) {
-              snprintf(idKey, sizeof(idKey), "id%d_%d", i, j);
-              rfids[i].id[j] = server.arg(idKey);
-            }
-          }
-        }
-      }
-      else if (targetSystem == "ch_racing_club") {
-        if (chRacingClubWebsocketServer != server.arg("ch_racing_club_websocket_server")) {
-          reConnectWebsocket = true; // Reconnect if the server has changed
-          chRacingClubWebsocketServer = server.arg("ch_racing_club_websocket_server");
-        }
-        String newChRacingClubCaCert = server.arg("ch_racing_club_websocket_ca_cert");
-        newChRacingClubCaCert.replace("\r", "");
-        if( chRacingClubCaCert != newChRacingClubCaCert) {
-          reConnectWebsocket = true; // Reconnect if the CA cert has changed
-          chRacingClubCaCert = newChRacingClubCaCert;
-        }
-        if(chRacingClubApiKey != server.arg("ch_racing_club_api_key")) {
-          reConnectWebsocket = true; // Reconnect if the API key has changed
-          chRacingClubApiKey = server.arg("ch_racing_club_api_key");
-        }
-        websocketServer = chRacingClubWebsocketServer;
-        websocketCaCert = chRacingClubCaCert;
-        resetRfidStorage();
-      }
-    }
-
-    configurationSave();
-
-    server.send(200, "text/html", "<!DOCTYPE html><html><head><title>RFID-Connector</title></head><body><h1>Configuration saved!</h1><p>You will be redirected in 2 seconds.</p><script>setTimeout(function() { window.location.href = 'http://" + wifiHostname + "'; }, 2000);</script></body></html>");
-    wait(500);
-    if (reConnectWebsocket) {
-      if(websocketConnected) {
-        client.close();
-        wait(500);
-      }
-      websocketLastAttempt = 0;
-      connectWebsocket();
-    }
-
-    if(reConnectWifi) {
-      wifiReload();
-    }
-    rfidSetDensitivityMode(rfidDenseMode);
-    rfidSetPowerLevel(rfidPowerLevel);
-    SerialRFID.write(ReadMulti,10);
-    Serial.println("RFID: started ReadMulti.");
-  } else {
-    server.send(200, "text/html", "<!DOCTYPE html><html><head><title>RFID-Connector</title></head><body><h1>Invalid request!</h1><p>You will be redirected in 2 seconds.</p><script>setTimeout(function() { window.location.href = 'http://" + wifiHostname + "'; }, 2000);</script></body></html>");
-  }
-}
-
-void wifiReload() {
-  Serial.println("WiFi: Initiating reload...");
-  if (WiFi.getMode() != WIFI_OFF) {
-    Serial.println("WiFi: Disconnecting existing connections...");
-    if (WiFi.status() == WL_CONNECTED) {
-      WiFi.disconnect(true);
-      wait(500);
-    }
-    WiFi.softAPdisconnect(true);
-    wait(500);
-  }
-  if(dnsServer.isUp()) {
-    dnsServer.stop();
-    wait(100);
-  }
-
-  WiFi.setHostname(wifiHostname.c_str());
-  Serial.print("WiFi: Attempting to connect to AP '");
-  Serial.print(wifiSsid);
-  Serial.println("'...");
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < WIFI_CONNECT_ATTEMPTS) {
-    waitForWifi(WIFI_CONNECT_DELAY_MS);
-    Serial.print(".");
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("\nWiFi: connected ");
-    Serial.println(WiFi.localIP());
-    Serial.print("WiFi: Hostname: ");
-    Serial.println(WiFi.getHostname());
-    wifiApMode = false;
-    ledOff(WIFI_AP_LED_PIN);
-  } else {
-    Serial.println("\nWiFi: connect failed, starting AP mode");
-    WiFi.disconnect(true);
-    wait(500);
-    WiFi.softAP(WIFI_AP_SSID);
-    dnsServer.start();
-    wifiApMode = true;
-    ledOn(WIFI_AP_LED_PIN);
-    Serial.print("\nWiFi: AP started, IP: ");
-    Serial.println(WiFi.softAPIP());
-  }
-}
-
-void connectWebsocket() {
-  now = millis();
-  if (now - websocketLastAttempt < websocketBackoff) {
-    return; // wait until backoff time is reached
-  }
-  websocketLastAttempt = now;
-  setReaderSetting(StopReadMulti, 7, StopReadMultiResponse, 8);
-
-  client = WebsocketsClient(); // Überschreibt das alte Objekt
-
-  client.onMessage(onMessageCallback);
-  client.onEvent(onEventsCallback);
-
-  Serial.print("Websocket: connecting ");
-  Serial.println(websocketServer);
-
-  if (websocketCaCert.length() > 0) {
-    client.setCACert(websocketCaCert.c_str());
-  }
-  websocketConnected = client.connect(websocketServer);
-
-  if(websocketConnected) {
-    JsonDocument doc;
-    if(targetSystem == "smart_race") {
-      doc["type"] = "controller_set";
-      doc["data"]["controller_id"] = "Z";
-    }
-
-    if(targetSystem == "ch_racing_club") {
-      doc["command"] = "rfid_connect";
-      doc["data"]["name"] = wifiHostname.c_str();
-      doc["data"]["ip"] = WiFi.localIP().toString();
-      doc["data"]["api_key"] = chRacingClubApiKey;
-      doc["data"]["version"] = VERSION;
-    }
-
-    char output[256];
-    serializeJson(doc, output);
-    client.ping();
-    client.send(output);
-    websocketBackoff = 1000; // reset backoff time on successful connection
-  } else {
-    Serial.println("Websocket: connection failed.");
-    if (targetSystem == "ch_racing_club") {
-      websocketBackoff = min(websocketBackoff * 2, websocketMaxBackoff); // Exponentielles Backoff
-    }
-    else {
-      websocketBackoff = 3000; // set backoff time for SmartRace
-    }
-  }
-  SerialRFID.write(ReadMulti,10);
 }
 
 void sendFinishLineMessage(int controller_id, unsigned long timestamp, String rfidString) {
-  int last_timestamp = rfids[controller_id].last;
-  int lap_time = last_timestamp > 0 ? timestamp - last_timestamp : timestamp;
-
   // set last timestamp for the controller
-  rfids[controller_id].last = timestamp;
+  rfids[controller_id-1].last = timestamp;
 
-  // build the message
-  JsonDocument doc;
-  if (targetSystem == "ch_racing_club") {
-    doc["command"] = "lap";
-    doc["data"]["api_key"] = chRacingClubApiKey;
-    doc["data"]["rfid"] = rfidString;
-    doc["data"]["duration"] = lap_time;
-  } else {
-    doc["type"] = "analog_lap";
-    doc["data"]["timestamp"] = rfids[controller_id].last;
-    doc["data"]["controller_id"] = controller_id + 1;
+  bool send_ok = false;
+  // Use snprintf to avoid String memory fragmentation
+  char message[64];
+  snprintf(message, sizeof(message), "%s#%lu", rfidString.c_str(), timestamp);
+  Serial.println(message);
+  // Send via BLE if connected
+  if (bleConnected && pTxCharacteristic != NULL) {
+    sendBleResponse(message);
+    send_ok = true;
   }
-
-  // send the message via websocket
-  char output[256];
-  serializeJson(doc, output);
-  if(websocketConnected) {
+  if(websocketClient != nullptr && websocketClient->available()) {
+      char wsMessage[128];
+      if (rfidString.length() == 1) {
+        // If rfidString is mappid_id and is a single character, treat it as controller ID
+        int ctrl_id = rfidString.toInt();
+        snprintf(wsMessage, sizeof(wsMessage), "{\"type\":\"analog_lap\",\"data\":{\"timestamp\":%lu,\"controller_id\":\"%d\"}}", timestamp, ctrl_id);
+      } else {
+        snprintf(wsMessage, sizeof(wsMessage), "{\"type\":\"analog_lap\",\"data\":{\"timestamp\":%lu,\"controller_id\":\"%d\"}}", timestamp, controller_id);
+      }
+      websocketClient->send(wsMessage);
+      send_ok = true;
+  }
+  if(send_ok) {
     ledOn(RFID_LED_PIN);
-    client.send(output);
   } else {
-    #ifndef DEBUG
-      Serial.print("Websocket is not connected!: ");
-      Serial.println(output);
-    #endif
+    ledOff(RFID_LED_PIN);
   }
-
-  // print the message to the serial console
-  #ifdef DEBUG
-    Serial.print("Websocket: ");
-    Serial.println(output);
-  #endif
 }
 
 void sendFinishLineEvent(String rfidString, unsigned long ms) {
-  bool found = false;
-  int maxRfidCnt = RFID_MAX_COUNT;
-  if (targetSystem == "smart_race") {
-    maxRfidCnt = RFID_SMARTRACE_MAX_COUNT;
-  }
-  for(int j = 0; j<RFID_STORAGE_COUNT;j++) {
-    for (int i = 0; i < maxRfidCnt; i++) {
-      if(rfids[i].id[j] == rfidString) {
-        if(rfids[i].last + minLapTime < ms) {
-          sendFinishLineMessage(i, ms, rfidString);
+  for (int i = 0; i < RFID_MAX_COUNT; i++) {
+    if(rfids[i].tagId == rfidString) {
+      if(rfids[i].last + minLapTime < ms) {
+        if (rfids[i].mappedId != "") {
+          sendFinishLineMessage(i+1, ms, rfids[i].mappedId);
         }
-        found = true;
-        break;
+        else {
+          sendFinishLineMessage(i+1, ms, rfidString);
+        }
       }
-    }
-    if (found) {
-      break;
+      return;
     }
   }
-  if(!found) {
-    for(int i=0; i < maxRfidCnt; i++) {
-      if(rfids[i].id[0] == "") {
-        rfids[i].id[0] = rfidString;
-        Serial.print("RFID: new car at controller id: ");
-        Serial.print(i+1);
-        Serial.print(rfids[i].id[0]);
+  // New RFID tag
+  for(int i=0; i < RFID_MAX_COUNT; i++) {
+    if(rfids[i].tagId == "") {
+      rfids[i].tagId = rfidString;
+      Serial.print("RFID: new car at controller id: ");
+      Serial.print(i+1);
+      Serial.print(" => ");
+      Serial.print(rfids[i].tagId);
+      Serial.println();
+      // Use optimized search for mapping
+      int mappingIdx = findMappingByTagId(rfidString);
+      if (mappingIdx >= 0) {
+        rfids[i].mappedId = mappings[mappingIdx].mappedId;
+        Serial.print(" -> mapped to id: ");
+        Serial.print(rfids[i].mappedId);
         Serial.println();
-        sendFinishLineMessage(i, ms, rfidString);
-        break;
+        sendFinishLineMessage(i+1, ms, mappings[mappingIdx].mappedId);
+      } else {
+        Serial.println();
+        sendFinishLineMessage(i+1, ms, rfidString);
       }
+      return;
     }
-  }
-}
-
-void onMessageCallback(WebsocketsMessage message) {
-  JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, message.data());
-  if (error) {
-    Serial.print("Websocket: JSON deserialization failed: ");
-    Serial.println(error.c_str());
-    return;
-  }
-  // TODO on race aborted or finished => resetRfidStorage();
-
-  #ifdef DEBUG
-    Serial.print("Websocket: received message: ");
-    serializeJsonPretty(doc, Serial);
-    Serial.println();
-  #endif
-  if (targetSystem == "ch_racing_club") {
-    //serializeJsonPretty(doc, Serial);
-    //Serial.println();
-    const char* message = doc["message"] | ""; // Falls "message" nicht existiert, wird ein leerer String zurückgegeben
-
-    if (message[0] != '\0') {
-      //Serial.print(F("Primäre Message: "));
-      //Serial.println(message);
-      // Prüfen, ob die Nachricht ein verschachteltes JSON (Command) ist
-      if (message[0] == '{') {
-          //Serial.println(F("Dies ist ein Command-JSON."));
-          JsonDocument commandDoc;
-          deserializeJson(commandDoc, message);
-          const char* command = commandDoc["command"] | "";
-          //Serial.println(command);
-          if (strcmp(command, "reset rfid") == 0) {
-            resetRfidStorage();
-            Serial.println("reset of rfid storage");
-          }
-      }
-    } else {
-      //Serial.println(F("Feld 'message' nicht gefunden."));
-    }
-  }
-}
-
-void onEventsCallback(WebsocketsEvent event, String data) {
-  if(event == WebsocketsEvent::ConnectionOpened) {
-      Serial.println("Websocket: connected");
-      websocketConnected = true;
-      ledOn(WEBSOCKET_LED_PIN);
-  } else if(event == WebsocketsEvent::ConnectionClosed) {
-    Serial.println("Websocket: connection closed");
-    websocketConnected = false;
-    ledOff(WEBSOCKET_LED_PIN);
-  } else if(event == WebsocketsEvent::GotPing) {
-    #ifdef DEBUG
-      Serial.println("Websocket: got a ping!");
-    #endif
-    client.pong();
-  } else if(event == WebsocketsEvent::GotPong) {
-    #ifdef DEBUG
-      Serial.println("Websocket: got a pong!");
-    #endif
   }
 }
 
 void wait(unsigned long waitTime) {
   unsigned long startWaitTime = millis();
   while((millis() - startWaitTime) < waitTime) {
-    if (webserverRunning) server.handleClient();
-    else delay(1);
-    client.poll();
-  }
-}
-
-void waitForWifi(unsigned long waitTime) {
-  unsigned long startWaitTime = millis();
-  while((millis() - startWaitTime) < waitTime) {
-    if(WiFi.status() == WL_CONNECTED) return; // exit if WiFi is connected
-    delay(10);
+    delay(1);
   }
 }
 
 void resetRfidStorage() {
-  char nameBuf[20];
   now = millis();
   for(int i=0; i < RFID_MAX_COUNT; i++) {
-    for(int j=0; j<RFID_STORAGE_COUNT; j++) {
-      rfids[i].id[j] = "";
-    }
-    snprintf(nameBuf, sizeof(nameBuf), "Controller %d", i+1);
-    rfids[i].name = nameBuf;
+    rfids[i].tagId = "";
+    rfids[i].mappedId = "";
     rfids[i].last = now;
   }
 }
@@ -824,6 +726,7 @@ void rfidSetDensitivityMode(bool dense_mode) {
       wait(200);
       ledOff(RFID_LED_PIN);
       wait(200);
+      rfidDenseMode = true;
     } else {
       Serial.println("RFID: failed to set dense reader mode.");
     }
@@ -843,71 +746,33 @@ void rfidSetDensitivityMode(bool dense_mode) {
       wait(200);
       ledOff(RFID_LED_PIN);
       wait(200);
+      rfidDenseMode = false;
     } else {
       Serial.println("RFID: failed to set high sensitivity reader mode.");
     }
   }
 }
 
-void rfidSetPowerLevel(int rfidPowerLevel) {
+void rfidSetPowerLevel(int powerLevel) {
   // Set power level based on loaded configuration
-  bool ok;
-
-  switch (rfidPowerLevel) {
-    case 10:
-      ok = setReaderSetting(Power10dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 11:
-      ok = setReaderSetting(Power11dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 12:
-      ok = setReaderSetting(Power12dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 13:
-      ok = setReaderSetting(Power13dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 14:
-      ok = setReaderSetting(Power14dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 15:
-      ok = setReaderSetting(Power15dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 16:
-      ok = setReaderSetting(Power16dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 17:
-      ok = setReaderSetting(Power17dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 18:
-      ok = setReaderSetting(Power18dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 19:
-      ok = setReaderSetting(Power19dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 20:
-      ok = setReaderSetting(Power20dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 21:
-      ok = setReaderSetting(Power21dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 22:
-      ok = setReaderSetting(Power22dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 23:
-      ok = setReaderSetting(Power23dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 24:
-      ok = setReaderSetting(Power24dbm, 9, PowerLevelResponse, 8);
-      break;
-    case 25:
-      ok = setReaderSetting(Power25dbm, 9, PowerLevelResponse, 8);
-      break;
-    default:
-      ok = setReaderSetting(Power26dbm, 9, PowerLevelResponse, 8);
-      break;
-  }
+  // Lookup table for power level commands (10-26 dBm)
+  const unsigned char* powerCommands[] = {
+    Power10dbm, Power11dbm, Power12dbm, Power13dbm, Power14dbm,
+    Power15dbm, Power16dbm, Power17dbm, Power18dbm, Power19dbm,
+    Power20dbm, Power21dbm, Power22dbm, Power23dbm, Power24dbm,
+    Power25dbm, Power26dbm
+  };
+  
+  // Clamp power level to valid range (10-26 dBm)
+  if (powerLevel < 10) powerLevel = 10;
+  if (powerLevel > 26) powerLevel = 26;
+  
+  // Use lookup table instead of switch statement
+  const unsigned char* powerCmd = powerCommands[powerLevel - 10];
+  bool ok = setReaderSetting(powerCmd, 9, PowerLevelResponse, 8);
 
   if(ok) {
+    rfidPowerLevel = powerLevel;
     Serial.print("RFID: set power level: ");
     Serial.print(rfidPowerLevel);
     Serial.println(" dBm");
@@ -961,9 +826,22 @@ void initRfid() {
   
   //set power level and start ReadMulti
   rfidSetPowerLevel(rfidPowerLevel);
+  Serial.println("RFID: minimum lap time (ms): " + String(minLapTime));
+  for (int i=0; i < RFID_MAX_MAPPING_COUNT; i++) {
+    if (mappings[i].tagId[0] != '\0') {
+      Serial.print("RFID: mapping loaded - tag ID: ");
+      Serial.print(mappings[i].tagId);
+      Serial.print(" -> mapped ID: ");
+      Serial.println(mappings[i].mappedId);
+    }
+  }
+  Serial.println("RFID: ble name: " + bleName);
+  Serial.println("RFID: wifi ssid: " + wifiSsid);
+  Serial.println("RFID: wifi password: " + wifiPassword);
+  Serial.println("RFID: websocket server: " + websocketServer);
+  Serial.println("RFID: initialized.");
   SerialRFID.write(ReadMulti,10);
-  Serial.println("RFID: started ReadMulti.");
-  Serial.println("RFID: running");
+  lastRestart = millis();
 }
 
 int getParameterLength() {
@@ -1133,7 +1011,7 @@ void checkRfid(unsigned char epcBytes[]) {
   String epcString(buffer);
 
   now = millis();
-  if (epcString != lastEpcString || (lastEpcRead + RFID_REPEAT_TIME) < now) {
+  if (epcString != lastEpcString || (lastEpcRead + minLapTime) < now) {
     sendFinishLineEvent(epcString, now);
     lastEpcString = epcString;
     lastEpcRead = now;
@@ -1195,7 +1073,6 @@ bool writeRfidEpc(const int newEpcId) {
       SerialRFID.read();
   }
   if(setReaderSetting(selectCommand, 26, expectedSelectResponse, 8)) {
-      Serial.println("Select command sent.");
       //write new EPC
       unsigned char writeCommand[28]; // Assuming max 32 words (64 bytes) for DT
       writeCommand[0] = 0xAA; // Header
@@ -1265,10 +1142,10 @@ bool writeRfidEpc(const int newEpcId) {
       if(setReaderSetting(writeCommand, 28, expectedWriteResponse, 23)) {
           Serial.println("Wrote EPC to label.");
           ledOn(RFID_LED_PIN);
-          ledOn(WEBSOCKET_LED_PIN);
+          ledOn(BLE_LED_PIN);
           wait(200);
           ledOff(RFID_LED_PIN);
-          ledOff(WEBSOCKET_LED_PIN);
+          ledOff(BLE_LED_PIN);
           SerialRFID.write(ReadMulti,10);
           return true; // Successfully wrote EPC
       } else {
@@ -1281,26 +1158,47 @@ bool writeRfidEpc(const int newEpcId) {
   return false; // Failed to write EPC
 }
 
-void ledOn(const int led_pin) {
-  #ifdef INVERT_LEDS
-    digitalWrite(led_pin, HIGH);
-  #else
-    digitalWrite(led_pin, LOW);
-  #endif
-  if(led_pin == RFID_LED_PIN) {
-    RfidLedOnMs = millis();
+void initBLE() {
+  // Create BLE device
+  BLEDevice::init(bleName.c_str());
+  
+  // Create BLE server
+  pServer = BLEDevice::createServer();
+  if (pServer == NULL) {
+    Serial.println("BLE: ERROR - Failed to create BLE server");
+    return;
   }
-}
-
-void ledOff(const int led_pin) {
-  #ifdef INVERT_LEDS
-    digitalWrite(led_pin, LOW);
-  #else
-    digitalWrite(led_pin, HIGH);
-  #endif
-  if(led_pin == RFID_LED_PIN) {
-    RfidLedOnMs = 0;
-  }
+  pServer->setCallbacks(new MyServerCallbacks());
+  
+  // Create BLE service
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  
+  // Create RX characteristic (receive from client)
+  pRxCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_RX_UUID,
+    BLECharacteristic::PROPERTY_WRITE
+  );
+  pRxCharacteristic->setCallbacks(new MyRxCharacteristicCallbacks());
+  
+  // Create TX characteristic (send to client)
+  pTxCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_TX_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pTxCharacteristic->addDescriptor(new BLE2902());
+  
+  // Start service
+  pService->start();
+  
+  // Start advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMaxPreferred(0x12);
+  BLEDevice::startAdvertising();
+  
+  Serial.println("BLE: initialized and advertising");
 }
 
 void setup() {
@@ -1309,15 +1207,15 @@ void setup() {
   pinMode(RFID_LED_PIN, OUTPUT);
   ledOn(RFID_LED_PIN);
 
+  pinMode(BLE_LED_PIN, OUTPUT);
+  ledOn(BLE_LED_PIN);
+
   pinMode(WEBSOCKET_LED_PIN, OUTPUT);
   ledOn(WEBSOCKET_LED_PIN);
-
-  pinMode(WIFI_AP_LED_PIN, OUTPUT);
-  ledOn(WIFI_AP_LED_PIN);
-  delay(1000);
+  wait(1000);
   ledOff(RFID_LED_PIN);
+  ledOff(BLE_LED_PIN);
   ledOff(WEBSOCKET_LED_PIN);
-  ledOff(WIFI_AP_LED_PIN);
 
   #ifdef PUSH_BUTTON_PIN
     pinMode(PUSH_BUTTON_PIN, INPUT_PULLUP);
@@ -1325,84 +1223,57 @@ void setup() {
 
   //init rfid storage
   resetRfidStorage();
-  delay(2000);
 
-  Serial.begin(115200);
+  Serial.begin(19200);
   wait(2000);
 
   Serial.print("RFID-Connector Version: ");
   Serial.println(VERSION);
   Serial.println("############################");
+  printCmdList();
 
   configurationLoad();
 
-  Serial.println();
-  Serial.println("Starting ...");
-
   if (wifiSsid != "") {
+    Serial.print("Connecting to WiFi SSID: ");
+    Serial.println(wifiSsid);
     WiFi.setHostname(wifiHostname.c_str());
     WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < WIFI_CONNECT_ATTEMPTS) {
-      waitForWifi(WIFI_CONNECT_DELAY_MS);
+    int wifiAttempt = 0;
+    while (WiFi.status() != WL_CONNECTED && wifiAttempt < 20) {
+      wait(500);
       Serial.print(".");
-      attempts++;
+      wifiAttempt++;
     }
-
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.print("\nWiFi: connected ");
+      Serial.println("\nWiFi connected. IP address: ");
       Serial.println(WiFi.localIP());
       Serial.print("WiFi: Hostname: ");
       Serial.println(WiFi.getHostname());
-      wifiApMode = false;
-      ledOff(WIFI_AP_LED_PIN);
+      if (websocketServer != "") {
+        bool res = connectWebsocket();
+        int retry = 0;
+        while (res == false and retry < 5) {
+          connectWebsocket();
+          retry += 1;
+        }
+      }
     } else {
-      WiFi.disconnect(true);
-      wait(500);
-      Serial.println("\nWiFi: connection failed!");
-      WiFi.softAP(WIFI_AP_SSID);
-      dnsServer.start();
-      Serial.println("WiFi: started AP mode");
-      wifiApMode = true;
-      ledOn(WIFI_AP_LED_PIN);
+      Serial.println("\nFailed to connect to WiFi.");
     }
-  } else {
-    WiFi.softAP(WIFI_AP_SSID);
-    dnsServer.start();
-    Serial.println("WiFi: started AP mode");
-    wifiApMode = true;
-    ledOn(WIFI_AP_LED_PIN);
   }
 
-  server.on("/", handleRoot);
-  server.on("/label-writer", handleLabelWriter);
-  server.on("/write-epc", HTTP_POST, handleWriteEpc);
-  server.on("/config", HTTP_POST, handleConfig);
-  // all unknown pages are redirected to configuration page
-  server.onNotFound(handleNotFound);
-
-  server.begin();
-  Serial.println("Webserver: running");
-  webserverRunning = true;
+  // Initialize BLE
+  initBLE();
 
   // Start RFID reader
   initRfid();
 }
 
 void loop() {
-  server.handleClient();
+  processSerialCommands();
   readTag = readRfid();
-  client.poll();
   now = millis();
-
-  if(!websocketConnected){
-    if(!wifiApMode) connectWebsocket();
-  }
-  else if(now > (websocketLastPing + WEBSOCKET_PING_INTERVAL)) {
-    websocketLastPing = now;
-    client.ping();
-  }
 
   if(!readTag) {
     if((RfidLedOnMs > 0) && (RfidLedOnMs + RFID_LED_ON_TIME) < now) {
@@ -1424,4 +1295,108 @@ void loop() {
       }
     #endif
   }
+  if (websocketWasConnected) {
+    if(websocketClient != nullptr && websocketClient->available()) {
+      websocketClient->poll();
+      if(now > (websocketLastPing + WEBSOCKET_PING_INTERVAL)) {
+        websocketLastPing = now;
+        websocketClient->ping();
+      }
+    }
+    else if(WiFi.status() == WL_CONNECTED) {
+      ledOff(WEBSOCKET_LED_PIN);
+      bool res = connectWebsocket();
+      int retry = 0;
+      while (res == false and retry < 5) {
+        connectWebsocket();
+        retry += 1;
+      }
+    }
+    else {
+      delete websocketClient;
+      websocketClient = nullptr;
+      ledOff(WEBSOCKET_LED_PIN);
+    }
+  }
 }
+
+void processSerialCommands() {
+  int len = Serial.available();
+  if (len > 0) {
+    if (len > 254) len = 254;
+    char buffer[255];
+    int bytesRead = Serial.readBytes(buffer, len);
+    buffer[bytesRead] = '\0';
+    serial_usb_command_data += buffer;
+  }
+
+  // Solange ein Newline gefunden wird, extrahiere und verarbeite Befehle
+  int index_newline;
+  while ((index_newline = serial_usb_command_data.indexOf('\n')) >= 0) {
+    String command = serial_usb_command_data.substring(0, index_newline);
+    serial_usb_command_data = serial_usb_command_data.substring(index_newline + 1);
+    
+    command.trim(); 
+    if (command.length() > 0) {
+      processCommands(command);
+    }
+  }
+}
+
+void restartEsp32() {
+  setReaderSetting(StopReadMulti, 7, StopReadMultiResponse, 8);
+  wait(100);
+  preferences.end();
+  wait(100);
+  ESP.restart();
+}
+
+bool connectWebsocket() {
+  if (websocketServer == "") {
+    Serial.println("Websocket: server not configured.");
+    return false;
+  }
+  websocketClient = new WebsocketsClient(); // Überschreibt das alte Objekt
+
+  websocketClient->onMessage(onMessageCallback);
+  websocketClient->onEvent(onEventsCallback);
+
+  Serial.print("Websocket: connecting ");
+  Serial.println(websocketServer);
+
+  websocketClient->connect(websocketServer);
+
+  if(websocketClient->available()) {
+    websocketClient->send("{\"type\":\"controller_set\",\"data\":{\"controller_id\":\"Z\"}}");
+    return true;
+  }
+  delete websocketClient;
+  websocketClient = nullptr;
+  Serial.println("Websocket: failed to connect");
+  return false;
+}
+
+void onMessageCallback(WebsocketsMessage message) {
+  Serial.print("Websocket: got message: ");
+  Serial.println(message.data());
+}
+
+void onEventsCallback(WebsocketsEvent event, String data) {
+  if(event == WebsocketsEvent::ConnectionOpened) {
+      Serial.println("Websocket: connected");
+      ledOn(WEBSOCKET_LED_PIN);
+      websocketWasConnected = true;
+  } else if(event == WebsocketsEvent::ConnectionClosed) {
+    Serial.println("Websocket: connection closed");
+    delete websocketClient;
+    websocketClient = nullptr;
+    ledOff(WEBSOCKET_LED_PIN);
+  } else if(event == WebsocketsEvent::GotPing) {
+    websocketClient->pong();
+  } else if(event == WebsocketsEvent::GotPong) {
+    #ifdef DEBUG
+      Serial.println("Websocket: got a pong!");
+    #endif
+  }
+}
+    
