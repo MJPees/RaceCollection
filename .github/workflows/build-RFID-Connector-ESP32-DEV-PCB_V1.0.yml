@@ -44,8 +44,9 @@ jobs:
           # Define a clear build output directory
           BUILD_OUTPUT_DIR="build_output"
           BOARD_OPTIONS="PartitionScheme=huge_app"
+          FULL_FQBN="esp32:esp32:esp32:${BOARD_OPTIONS}"
           
-          arduino-cli compile --fqbn esp32:esp32:esp32 --build-path ${BUILD_OUTPUT_DIR} ./RFID-Connector/
+          arduino-cli compile --fqbn "${FULL_FQBN}" --build-path ${BUILD_OUTPUT_DIR} ./RFID-Connector/
 
       - name: Create Artifact Directory
         run: |
