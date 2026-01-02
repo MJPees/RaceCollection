@@ -269,7 +269,7 @@ void getVersionResponse(bool fromBle = false) {
   }
 }
 
-void getMacResonse(bool fromBle = false) {
+void getMacResponse(bool fromBle = false) {
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_BT);
   char macStr[18];
@@ -501,7 +501,7 @@ void processCommands(String command, bool fromBle = false) {
     getVersionResponse(fromBle);
   }
   else if(command.equalsIgnoreCase("CMD_GET_MAC")) {
-    getMacResonse(fromBle);
+    getMacResponse(fromBle);
   }
   else {
     Serial.println("Unknown command: " + command);
