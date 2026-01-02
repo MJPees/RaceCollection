@@ -186,6 +186,7 @@ void printCmdList() {
   Serial.println(" CMD_RESET_RFID_STORAGE - Reset RFID tag storage");
   Serial.println(" CMD_WRITE_RFID:<[1:255]> - Write new RFID tag with specified ID (last byte)");
   Serial.println(" CMD_REBOOT - Reboot device");
+  Serial.println(" CMD_GET_MAC - Get BLE-MAC address");
   Serial.println(" CMD_GET_VERSION - Get firmware version");
   Serial.println("############################");
 }
@@ -262,6 +263,19 @@ void getWebsocketResponse(bool fromBle = false) {
 
 void getVersionResponse(bool fromBle = false) {
   String response = "MSG_GET_VERSION:" + String(VERSION);
+  Serial.println(response);
+  if (fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+void getMacResonse(bool fromBle = false) {
+  uint8_t mac[6];
+  esp_read_mac(mac, ESP_MAC_BT);
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  String response = "MSG_GET_MAC:" + String(macStr);
   Serial.println(response);
   if (fromBle) {
     sendBleResponse(response);
@@ -476,6 +490,7 @@ void processCommands(String command, bool fromBle = false) {
     getMinLapTimeResponse(fromBle);
     getMappingResponse(fromBle);
     getVersionResponse(fromBle);
+    getMacResponse(fromBle);
     String response = "MSG_GET_CONFIG:OK";
     Serial.println(response);
     if (fromBle) {
@@ -484,6 +499,9 @@ void processCommands(String command, bool fromBle = false) {
   }
   else if(command.equalsIgnoreCase("CMD_GET_VERSION")) {
     getVersionResponse(fromBle);
+  }
+  else if(command.equalsIgnoreCase("CMD_GET_MAC")) {
+    getMacResonse(fromBle);
   }
   else {
     Serial.println("Unknown command: " + command);
