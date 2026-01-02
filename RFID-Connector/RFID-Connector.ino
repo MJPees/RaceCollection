@@ -399,6 +399,7 @@ void processCommands(String command, bool fromBle = false) {
       wifiPassword = ssidData.substring(commaIndex + 1);
       wifiSsid.trim();
       wifiPassword.trim();
+    }
     else {
       wifiSsid = "";
       wifiPassword = "";
