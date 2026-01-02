@@ -399,12 +399,14 @@ void processCommands(String command, bool fromBle = false) {
       wifiPassword = ssidData.substring(commaIndex + 1);
       wifiSsid.trim();
       wifiPassword.trim();
-      // Here you would save the SSID and password to preferences or a config file
-      String response = "MSG_SET_WIFI:OK";
-      Serial.println(response);
-      if (fromBle) {
-        sendBleResponse(response);
-      }
+    else {
+      wifiSsid = "";
+      wifiPassword = "";
+    }
+    String response = "MSG_SET_WIFI:OK";
+    Serial.println(response);
+    if (fromBle) {
+      sendBleResponse(response);
     }
   }
   else if(command.equalsIgnoreCase("CMD_GET_WEBSOCKET_SERVER")) {
