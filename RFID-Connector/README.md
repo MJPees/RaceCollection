@@ -34,15 +34,15 @@ Mit Hilfe des Sketches RFID-Label-Writer.ino  kann die ID neu geschrieben werden
 
 ## Aufbau/Verdrahtung ohne Platine (ESP32-DEV)
 R200 5V <--> ESP32 5V<br>
-R200 TX <--> ESP32 GPIO 16<br>
-R200 RX <--> ESP32 GPIO 17<br>
+R200 TX <--> ESP32 GPIO 17<br>
+R200 RX <--> ESP32 GPIO 16<br>
 R200 GND <--> ESP32 GND<br><br>
 optionale RFID LED:<br> 
-Der Anschluss der RFID LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 2 (ESP32-DEV).<br><br>
+Der Anschluss der RFID LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 32 (ESP32-DEV).<br><br>
+optionale BLE LED<br>
+Der Anschluss der BLE LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 33 (ESP32-DEV).<br><br> 
 optionale WEBSOCKET LED<br>
-Der Anschluss der WEBSOCKET LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 4 (ESP32-DEV).<br><br> 
-optionale WIFI AP-Mode LED<br>
-Der Anschluss der WIFI AP-Mode LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 25 (ESP32-DEV).<br><br>
+Der Anschluss der WEBSOCKET LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 25 (ESP32-DEV).<br><br>
 optinaler Taster:<br>
 Der Taster wird an GND und Pin 23 (ESP32-DEV) angeschlossen.<br>
 
