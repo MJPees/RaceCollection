@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RFID-Connector</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        #app {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .connection-section {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+        .commands-section {
+            margin-bottom: 20px;
+        }
+        .command-group {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+        .command-group h3 {
+            margin-bottom: 10px;
+            color: #495057;
+            font-size: 16px;
+        }
+        .custom-command {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .custom-command input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .log-section {
+            margin-top: 20px;
+        }
+        .log-container {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            background: #212529;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .log-entry.sent {
+            color: #ffc107;
+        }
+        .log-entry.received {
+            color: #28a745;
+        }
+        .log-entry.error {
+            color: #dc3545;
+        }
+        .log-entry.info {
+            color: #17a2b8;
+        }
+        .log-timestamp {
+            color: #6c757d;
+            font-size: 11px;
+        }
+        .log-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .input-group input {
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
+            width: 150px;
+        }
+        .input-group label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h1>RFID-Connector</h1>
+
+        <div class="connection-section">
+            <button @click="connect" :disabled="isConnected" class="btn-primary">
+                {{ isConnected ? '✓ USB Verbunden' : 'USB verbinden' }}
+            </button>
+            <button @click="disconnect" :disabled="!isConnected" class="btn-danger">
+                USB Trennen
+            </button>
+            <span class="status" :class="isConnected ? 'connected' : 'disconnected'">
+                USB: {{ isConnected ? 'Verbunden' : 'Getrennt' }}
+            </span>
+            <div v-if="isConnected" style="margin-top: 10px; color: #6c757d; font-size: 14px;">
+                Port: {{ portInfo }}
+            </div>
+
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #dee2e6;">
+                <button @click="connectBLE" :disabled="isBLEConnected" class="btn-primary">
+                    {{ isBLEConnected ? '✓ BLE Verbunden' : 'BLE verbinden' }}
+                </button>
+                <button @click="disconnectBLE" :disabled="!isBLEConnected" class="btn-danger">
+                    BLE Trennen
+                </button>
+                <span class="status" :class="isBLEConnected ? 'connected' : 'disconnected'">
+                    BLE: {{ isBLEConnected ? 'Verbunden' : 'Getrennt' }}
+                </span>
+                <div v-if="isBLEConnected" style="margin-top: 10px; color: #6c757d; font-size: 14px;">
+                    Device: {{ bleDeviceName }}
+                </div>
+            </div>
+        </div>
+
+        <div class="commands-section" v-if="isConnected || isBLEConnected">
+            <div class="command-group">
+                <h3>📊 Konfiguration abrufen</h3>
+                <button @click="sendCommand('CMD_GET_CONFIG')" class="btn-info">Komplette Config</button>
+                <button @click="sendCommand('CMD_GET_VERSION')" class="btn-info">Version</button>
+                <button @click="sendCommand('CMD_GET_MAC')" class="btn-info">MAC Adresse</button>
+                <button @click="sendCommand('CMD_GET_MAPPINGS')" class="btn-info">Mappings</button>
+            </div>
+
+            <div class="command-group">
+                <h3>⚙️ RFID Einstellungen</h3>
+                <button @click="sendCommand('CMD_GET_POWER')" class="btn-info">Power Level abrufen</button>
+                <button @click="sendCommand('CMD_GET_DENSE_MODE')" class="btn-info">Dense Mode abrufen</button>
+                <button @click="sendCommand('CMD_GET_MIN_LAP_TIME')" class="btn-info">Min Lap Time abrufen</button>
+
+                <div class="input-group">
+                    <label>
+                        Power (10-26):
+                        <input v-model.number="powerLevel" type="number" min="10" max="26">
+                    </label>
+                    <button @click="sendCommand('CMD_SET_POWER:' + powerLevel)" class="btn-success">Set Power</button>
+                </div>
+
+                <div class="input-group">
+                    <label>
+                        Dense Mode:
+                        <select v-model="denseMode" style="padding: 8px; border-radius: 5px;">
+                            <option value="0">Aus (0)</option>
+                            <option value="1">An (1)</option>
+                        </select>
+                    </label>
+                    <button @click="sendCommand('CMD_SET_DENSE_MODE:' + denseMode)" class="btn-success">Set Dense Mode</button>
+                </div>
+
+                <div class="input-group">
+                    <label>
+                        Min Lap Time (ms):
+                        <input v-model.number="minLapTime" type="number" min="0">
+                    </label>
+                    <button @click="sendCommand('CMD_SET_MIN_LAP_TIME:' + minLapTime)" class="btn-success">Set Min Lap Time</button>
+                </div>
+            </div>
+
+            <div class="command-group">
+                <h3>📡 WiFi & WebSocket</h3>
+                <button @click="sendCommand('CMD_GET_WIFI')" class="btn-info">WiFi abrufen</button>
+                <button @click="sendCommand('CMD_GET_WEBSOCKET_SERVER')" class="btn-info">WebSocket abrufen</button>
+
+                <div class="input-group">
+                    <label>
+                        SSID:
+                        <input v-model="wifiSsid" type="text" placeholder="WiFi SSID">
+                    </label>
+                    <label>
+                        Password:
+                        <input v-model="wifiPassword" type="password" placeholder="Password">
+                    </label>
+                    <button @click="sendCommand('CMD_SET_WIFI:' + wifiSsid + ',' + wifiPassword)" class="btn-success">Set WiFi</button>
+                </div>
+
+                <div class="input-group">
+                    <label>
+                        WebSocket URL:
+                        <input v-model="websocketUrl" type="text" placeholder="ws://192.168.1.1:3000" style="width: 300px;">
+                    </label>
+                    <button @click="sendCommand('CMD_SET_WEBSOCKET_SERVER:' + websocketUrl)" class="btn-success">Set WebSocket</button>
+                </div>
+            </div>
+
+            <div class="command-group">
+                <h3>🏷️ RFID Mappings</h3>
+                <div class="input-group">
+                    <label>
+                        Tag ID:
+                        <input v-model="tagId" type="text" placeholder="E2801170..." style="width: 200px;">
+                    </label>
+                    <label>
+                        Mapped ID:
+                        <input v-model="mappedId" type="text" placeholder="1">
+                    </label>
+                    <button @click="sendCommand('CMD_SET_MAPPING:' + tagId + ',' + mappedId)" class="btn-success">Set Mapping</button>
+                    <button @click="sendCommand('CMD_REMOVE_MAPPING:' + tagId)" class="btn-danger">Remove Mapping</button>
+                </div>
+                <button @click="sendCommand('CMD_CLEAR_MAPPINGS')" class="btn-danger">Alle Mappings löschen</button>
+            </div>
+
+            <div class="command-group">
+                <h3>💾 Speichern & System</h3>
+                <button @click="sendCommand('CMD_SAVE_SETTINGS')" class="btn-success">Einstellungen speichern</button>
+                <button @click="sendCommand('CMD_RESET_RFID_STORAGE')" class="btn-danger">RFID Storage zurücksetzen</button>
+                <button @click="sendCommand('CMD_REBOOT')" class="btn-danger">Neu starten</button>
+            </div>
+
+            <div class="command-group">
+                <h3>✏️ RFID Schreiben</h3>
+                <div class="input-group">
+                    <label>
+                        RFID ID (1-255):
+                        <input v-model.number="rfidWriteId" type="number" min="1" max="255">
+                    </label>
+                    <button @click="sendCommand('CMD_WRITE_RFID:' + rfidWriteId)" class="btn-success">RFID schreiben</button>
+                </div>
+            </div>
+
+            <div class="command-group">
+                <h3>🔧 Benutzerdefinierter Befehl</h3>
+                <div class="custom-command">
+                    <input
+                        v-model="customCommand"
+                        @keyup.enter="sendCommand(customCommand)"
+                        type="text"
+                        placeholder="z.B. CMD_GET_VERSION"
+                    >
+                    <button @click="sendCommand(customCommand)" class="btn-secondary">Senden</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <div class="log-controls">
+                <h2>📝 Kommunikations-Log</h2>
+                <button @click="clearLog" class="btn-secondary">Log löschen</button>
+            </div>
+            <div class="log-container" ref="logContainer">
+                <div v-for="(entry, index) in log" :key="index" class="log-entry" :class="entry.type">
+                    <span class="log-timestamp">{{ entry.timestamp }}</span> {{ entry.message }}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    port: null,
+                    reader: null,
+                    isConnected: false,
+                    log: [],
+                    customCommand: '',
+                    portInfo: '',
+                    // BLE
+                    bleDevice: null,
+                    bleServer: null,
+                    bleService: null,
+                    bleTxCharacteristic: null,
+                    bleRxCharacteristic: null,
+                    isBLEConnected: false,
+                    bleDeviceName: '',
+                    // Settings
+                    powerLevel: 26,
+                    denseMode: '1',
+                    minLapTime: 3000,
+                    wifiSsid: '',
+                    wifiPassword: '',
+                    websocketUrl: '',
+                    tagId: '',
+                    mappedId: '',
+                    rfidWriteId: 1,
+                    receiveBuffer: ''
+                };
+            },
+            methods: {
+                async connect() {
+                    try {
+                        // Web Serial API verwenden
+                        this.port = await navigator.serial.requestPort();
+                        await this.port.open({
+                            baudRate: 19200,
+                            dataBits: 8,
+                            stopBits: 1,
+                            parity: 'none',
+                            flowControl: 'none'
+                        });
+
+                        this.isConnected = true;
+                        const info = this.port.getInfo();
+                        this.portInfo = `VID: ${info.usbVendorId || 'N/A'}, PID: ${info.usbProductId || 'N/A'}`;
+
+                        this.addLog('✓ USB verbunden (19200 Baud)', 'info');
+
+                        // Starte Leseschleife asynchron im Hintergrund
+                        this.startReading().catch(err => {
+                            if (!err.message || !err.message.includes('cancel')) {
+                                this.addLog('USB Lesefehler: ' + err.message, 'error');
+                            }
+                        });
+
+                        // Lade Config nach Verbindung
+                        setTimeout(() => {
+                            this.sendCommand('CMD_GET_CONFIG');
+                        }, 1000);
+                    } catch (error) {
+                        this.addLog('✗ USB Fehler: ' + error.message, 'error');
+                        console.error(error);
+                    }
+                },
+
+                async disconnect() {
+                    try {
+                        if (this.reader) {
+                            try {
+                                await this.reader.cancel();
+                            } catch (e) {
+                                // Ignore cancel errors
+                            }
+                            this.reader = null;
+                        }
+                        if (this.port) {
+                            await this.port.close();
+                            this.port = null;
+                        }
+                        this.isConnected = false;
+                        this.addLog('USB getrennt', 'info');
+                    } catch (error) {
+                        this.addLog('Fehler beim Trennen: ' + error.message, 'error');
+                    }
+                },
+
+                async startReading() {
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    try {
+                        this.reader = this.port.readable.getReader();
+
+                        while (true) {
+                            const { value, done } = await this.reader.read();
+
+                            if (done) {
+                                break;
+                            }
+
+                            if (value && value.length > 0) {
+                                // Decode Uint8Array to text
+                                const text = decoder.decode(value, { stream: true });
+                                buffer += text;
+
+                                const lines = buffer.split('\n');
+                                buffer = lines.pop() || '';
+
+                                for (const line of lines) {
+                                    const trimmed = line.trim();
+                                    if (trimmed) {
+                                        // MSG_ Responses hervorheben und parsen
+                                        if (trimmed.startsWith('MSG_')) {
+                                            this.addLog('◄ ' + trimmed, 'received');
+                                            this.parseConfigResponse(trimmed);
+                                        } else {
+                                            this.addLog('◄ ' + trimmed, 'info');
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Kleine Pause um Event Loop nicht zu blockieren
+                            await new Promise(resolve => setTimeout(resolve, 0));
+                        }
+                    } catch (error) {
+                        throw error;
+                    } finally {
+                        if (this.reader) {
+                            try {
+                                this.reader.releaseLock();
+                            } catch (e) {
+                                // Ignore
+                            }
+                        }
+                    }
+                },
+
+                async sendCommand(command) {
+                    if ((!this.isConnected && !this.isBLEConnected) || !command.trim()) {
+                        this.addLog('Kann nicht senden: Nicht verbunden oder leerer Befehl', 'error');
+                        return;
+                    }
+
+                    try {
+                        const encoder = new TextEncoder();
+                        const data = encoder.encode(command + '\n');
+
+                        // Sende über USB wenn verbunden
+                        if (this.isConnected && this.port && this.port.writable) {
+                            const writer = this.port.writable.getWriter();
+                            await writer.write(data);
+                            writer.releaseLock();
+                        }
+
+                        // Sende über BLE wenn verbunden
+                        if (this.isBLEConnected && this.bleRxCharacteristic) {
+                            await this.bleRxCharacteristic.writeValue(data);
+                        }
+
+                        this.addLog('► ' + command, 'sent');
+                        this.customCommand = '';
+                    } catch (error) {
+                        this.addLog('Sendefehler: ' + error.message, 'error');
+                        console.error('Send error:', error);
+                    }
+                },
+
+                async connectBLE() {
+                    try {
+                        // Nordic UART Service UUIDs
+                        const SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+                        const RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write to ESP32
+                        const TX_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Notify from ESP32
+
+                        this.addLog('Suche BLE Geräte...', 'info');
+
+                        // Request device
+                        this.bleDevice = await navigator.bluetooth.requestDevice({
+                            filters: [
+                                { services: [SERVICE_UUID] }
+                            ]
+                        });
+
+                        this.bleDeviceName = this.bleDevice.name || 'Unbekannt';
+                        this.addLog('Gefunden: ' + this.bleDeviceName, 'info');
+
+                        // Connect to GATT server
+                        this.bleServer = await this.bleDevice.gatt.connect();
+                        this.addLog('GATT Server verbunden', 'info');
+
+                        // Get service
+                        this.bleService = await this.bleServer.getPrimaryService(SERVICE_UUID);
+                        this.addLog('Service gefunden', 'info');
+
+                        // Get characteristics
+                        this.bleTxCharacteristic = await this.bleService.getCharacteristic(TX_CHAR_UUID);
+                        this.bleRxCharacteristic = await this.bleService.getCharacteristic(RX_CHAR_UUID);
+                        this.addLog('Characteristics gefunden', 'info');
+
+                        // Start notifications
+                        await this.bleTxCharacteristic.startNotifications();
+                        this.bleTxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+                            const decoder = new TextDecoder();
+                            const value = decoder.decode(event.target.value);
+
+                            // Process received data line by line
+                            const lines = value.split('\n');
+                            for (const line of lines) {
+                                const trimmed = line.trim();
+                                if (trimmed) {
+                                    if (trimmed.startsWith('MSG_')) {
+                                        this.addLog('◄ ' + trimmed, 'received');
+                                        this.parseConfigResponse(trimmed);
+                                    } else {
+                                        this.addLog('◄ ' + trimmed, 'info');
+                                    }
+                                }
+                            }
+                        });
+
+                        this.isBLEConnected = true;
+                        this.addLog('✓ BLE verbunden', 'info');
+
+                        // Disconnect handler
+                        this.bleDevice.addEventListener('gattserverdisconnected', () => {
+                            this.isBLEConnected = false;
+                            this.addLog('BLE getrennt', 'info');
+                        });
+
+                        // Test command
+                        setTimeout(() => {
+                            this.sendCommand('CMD_GET_CONFIG');
+                        }, 1000);
+
+                    } catch (error) {
+                        this.addLog('✗ BLE Fehler: ' + error.message, 'error');
+                        console.error('BLE error:', error);
+                    }
+                },
+
+                async disconnectBLE() {
+                    try {
+                        if (this.bleDevice && this.bleDevice.gatt.connected) {
+                            this.bleDevice.gatt.disconnect();
+                        }
+                        this.bleDevice = null;
+                        this.bleServer = null;
+                        this.bleService = null;
+                        this.bleTxCharacteristic = null;
+                        this.bleRxCharacteristic = null;
+                        this.isBLEConnected = false;
+                        this.addLog('BLE getrennt', 'info');
+                    } catch (error) {
+                        this.addLog('Fehler beim Trennen: ' + error.message, 'error');
+                    }
+                },
+
+                parseConfigResponse(message) {
+                    // Parse MSG_* responses und aktualisiere die Felder
+                    if (message.startsWith('MSG_GET_POWER:')) {
+                        const value = message.substring('MSG_GET_POWER:'.length);
+                        this.powerLevel = parseInt(value) || 26;
+                    }
+                    else if (message.startsWith('MSG_GET_DENSE_MODE:')) {
+                        const value = message.substring('MSG_GET_DENSE_MODE:'.length);
+                        this.denseMode = value.trim();
+                    }
+                    else if (message.startsWith('MSG_GET_MIN_LAP_TIME:')) {
+                        const value = message.substring('MSG_GET_MIN_LAP_TIME:'.length);
+                        this.minLapTime = parseInt(value) || 3000;
+                    }
+                    else if (message.startsWith('MSG_GET_WIFI:')) {
+                        const value = message.substring('MSG_GET_WIFI:'.length);
+                        const parts = value.split(',');
+                        if (parts.length >= 2) {
+                            this.wifiSsid = parts[0].trim();
+                            this.wifiPassword = parts[1].trim();
+                        }
+                    }
+                    else if (message.startsWith('MSG_GET_WEBSOCKET_SERVER:')) {
+                        const value = message.substring('MSG_GET_WEBSOCKET_SERVER:'.length);
+                        this.websocketUrl = value.trim();
+                    }
+                },
+
+                addLog(message, type = 'info') {
+                    const timestamp = new Date().toLocaleTimeString('de-DE');
+                    this.log.push({ timestamp, message, type });
+
+                    // Auto-scroll
+                    this.$nextTick(() => {
+                        const container = this.$refs.logContainer;
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    });
+
+                    // Limit log size
+                    if (this.log.length > 500) {
+                        this.log.shift();
+                    }
+                },
+
+                clearLog() {
+                    this.log = [];
+                    this.addLog('Log gelöscht', 'info');
+                }
+            },
+            mounted() {
+                // Check Web Serial API Support
+                if (!('serial' in navigator)) {
+                    this.addLog('✗ Web Serial API nicht unterstützt', 'error');
+                } else {
+                    this.addLog('✓ Web Serial API verfügbar', 'info');
+                }
+
+                // Check Web Bluetooth API Support
+                if (!('bluetooth' in navigator)) {
+                    this.addLog('✗ Web Bluetooth API nicht unterstützt', 'error');
+                } else {
+                    this.addLog('✓ Web Bluetooth API verfügbar', 'info');
+                }
+
+                this.addLog('Wähle USB oder BLE zum Verbinden', 'info');
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
