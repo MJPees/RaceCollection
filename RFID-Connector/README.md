@@ -9,11 +9,6 @@ Der RFID-Connector ermöglicht eine Zeitnahme für z.B. Carrera Hybrid oder Dr!f
 - **CH Racing Club:** BLE (Bluetooth Low Energy) - unterstützt 30 gleichzeitige RFID-Tags<br>
 
 ## Funktionen
-
-- **Mehrere Konfigurationsmöglichkeiten:**
-  - USB/Serial-Konfiguration (19200 Baud) über configuration.html
-  - BLE-Konfiguration über Bluetooth Low Energy (Nordic UART Service, BLE-Name: "RFID-Connector")
-  
 - **RFID-Mapping:** Bis zu 30 RFID-Tag-zu-Controller-Mappings möglich. IDs werden automatisch erkannt und können individuell zugeordnet werden. SmartRace unterstützt 8 gleichzeitige Tags, CH Racing Club 30 gleichzeitige Tags.
 
 - **Dense Mode:** Optimierter Lesemodus für dichte Umgebungen mit vielen RFID-Tags (aktiviert/deaktiviert per Konfiguration).
@@ -59,7 +54,6 @@ https://amzn.eu/d/12kL505
 kleine RFID-Tags (Carrera Hybrid):<br>
 https://de.aliexpress.com/item/1005003501876260.html (2515-Wet inlay)
 <br>Anmerkung:<br>
-Die Tags haben im Auslieferungszustand alle die gleiche ID (EPC).<br>
 Über die configuration.html oder per CMD_WRITE_RFID Befehl ein Tag beschrieben werden.
 <br><br>
 
@@ -77,7 +71,6 @@ Der RFID-Connector kann auf drei Arten konfiguriert werden:
 - Öffne [configuration.html](configuration.html) im Browser (Chrome/Edge)
 - Verbinde per Bluetooth Low Energy
 - BLE-Name: "RFID-Connector"
-- Service: Nordic UART Service (6E400001-B5A3-F393-E0A9-E50E24DCCA9E)
 
 ### 3. CH Racing Club
 - Verbinde per Bluetooth Low Energy
@@ -149,7 +142,7 @@ Platinen können auf Anfrage zum Selbstkostenpreis bezogen werden.
 - **Max. Mappings:** 30 Tag-zu-Controller-Zuordnungen
 - **Standard Power Level:** 26 dBm (einstellbar 10-26 dBm)
 - **Standard Min. Lap Time:** 3000 ms
-- **BLE Service:** Nordic UART Service (UUID: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E)
+- **BLE Service:** Nordic UART
 - **USB/Serial:** 19200 Baud, 8N1 (PC ↔ ESP32)
 - **Preferences-Namespace:** "rfid_connector"
 
