@@ -62,13 +62,13 @@ https://de.aliexpress.com/item/1005003501876260.html (2515-Wet inlay)
 Der RFID-Connector kann auf drei Arten konfiguriert werden:
 
 ### 1. USB/Serial-Konfiguration
-- Öffne [configuration.html](configuration.html) im Browser (Chrome/Edge)
+- Öffne [configuration.html](configuration.html) oder direkt im [Web](https://race-collection.netlify.app) im Browser (Chrome/Edge)
 - Verbinde per USB (19200 Baud)
 - Vollständige Konfiguration ohne WiFi-Verbindung möglich
 - Ideal für initiales Setup oder Fehlerdiagnose
 
 ### 2. BLE-Konfiguration
-- Öffne [configuration.html](configuration.html) im Browser (Chrome/Edge)
+- Öffne [configuration.html](configuration.html) oder direkt im [Web](https://race-collection.netlify.app)im Browser (Chrome/Edge)
 - Verbinde per Bluetooth Low Energy
 - BLE-Name: "RFID-Connector"
 
