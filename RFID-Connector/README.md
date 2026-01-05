@@ -1,20 +1,51 @@
 # RFID-Connector
 
-Der RFID-Connector ermöglicht eine Zeitnahme für z.B. Carrera Hybrid oder Dr!ft von Sturmkind usw. mit <a href="https://www.smartrace.de/">SmartRace</a> oder <a href="https://carrera-hybrid-racing-club.de/">CH-Racing-Club</a>. Hierzu wird bei SmartRace der analoge Sensormodus genutzt. Die Anbindung erfolgt über WLAN. Die Zeitnahme ist aktuell für 8 Autos möglich (8 Controller in SmartRace).<br>
-Des Weiteren können 2 RFID-Ids für einen Controller definiert werden. Somit sind auch Langstreckenrennen mit jeweils zwei Fahrzeugen pro Team möglich.
-Der ESP32 geht bei fehlender WLAN-Konfiguration automatisch in einen Accesspoint-Modus.
-Über das Webinterface <a href="http://rfid-connector">http://rfid-connector</a> kann der RFID-Connector konfiguriert werden.
-Zunächst wird die SSID und das Wlan-Passwort des zu verwendenden Routers konfiguriert. Anschließend kann die Websocketaddresse des SmartRace-Servers für den analogen Sensorbetrieb gesetzt werden bzw. der Websocket, Zertifikat und der API-Key für CH-Racing-Club eingegeben werden. Zwischen den Konfigurationen SmartRace/Ch-Racing-Club kann im Anschluß über eine Auswahlbox umgeschaltet werden.
-Der Power Level für den RFID-Empfang kann von 10dbm bis 26dbm eingestellt werden.
-Die Ids der RFID-Chips für Controller 1-8 werden bei neu erkannten IDs automatisch gefüllt, wenn sie im Webinterface zuvor "leer" sind. Temporäres Zurücksetzten der IDs (bis zum nächsten Reboot) kann bei der Platinenvariante über den Taster erfolgen.
-Die optionale ID2 pro Controller muss für Team-Rennen im Webinterface ausgefüllt werden.<br><br>
+**Firmware-Version: 2.0.0**
+
+Der RFID-Connector ermöglicht eine Zeitnahme für z.B. Carrera Hybrid oder Dr!ft von Sturmkind usw. mit <a href="https://www.smartrace.de/">SmartRace</a> oder <a href="https://carrera-hybrid-racing-club.de/">CH-Racing-Club</a>.
+
+**Anbindung je nach Anwendung:**
+- **SmartRace:** WLAN + WebSocket (analoger Sensormodus) - unterstützt 8 gleichzeitige RFID-Tags
+- **CH Racing Club:** BLE (Bluetooth Low Energy) - unterstützt 30 gleichzeitige RFID-Tags<br>
+
+## Funktionen
+
+- **Mehrere Konfigurationsmöglichkeiten:**
+  - USB/Serial-Konfiguration (19200 Baud) über configuration.html
+  - BLE-Konfiguration über Bluetooth Low Energy (Nordic UART Service, BLE-Name: "RFID-Connector")
+  
+- **RFID-Mapping:** Bis zu 30 RFID-Tag-zu-Controller-Mappings möglich. IDs werden automatisch erkannt und können individuell zugeordnet werden. SmartRace unterstützt 8 gleichzeitige Tags, CH Racing Club 30 gleichzeitige Tags.
+
+- **Dense Mode:** Optimierter Lesemodus für dichte Umgebungen mit vielen RFID-Tags (aktiviert/deaktiviert per Konfiguration).
+
+- **Power Level Einstellung:** RFID-Empfangsleistung von 10 dBm bis 26 dBm einstellbar für optimale Reichweite.
+
+- **Minimale Rundenzeit:** Konfigurierbare minimale Zeit zwischen Runden (Standard: 3000 ms) verhindert doppelte Erfassungen.
+
+- **Team-Rennen:** Mehrere RFID-IDs können eine RFID-ID zugeordnet werden (z.B. für Team-Rennen).
+
+- **Statusanzeigen:** Optionale LEDs für RFID-Aktivität, BLE-Verbindung und WebSocket-Status.
+
+- **Reset-Taster:** Temporäres Zurücksetzen der RFID-Speicherung (bis Reboot) über optional anschließbaren Taster.<br><br>
 
 
 <a href="../script-flasher/README.md">Flash-Anleitungen</a>
 
-Als RFID-Leser wird ein R200 der Firma Inveton verwendet. Dieser kann z.B. über AliExpress bezogen werden und liegt inklusive einer 1dbi Antenne mit Versand aktuell bei ca. 50 Euro. 
-Des Weiteren wird ein ESP32 benötigt.
-Passende RFID-Aufkleber können bei Amazon bezogen werden.
+## Hardware-Anforderungen
+
+Als RFID-Leser wird ein **R200 der Firma Inveton** verwendet. Dieser kann z.B. über AliExpress bezogen werden und liegt inklusive einer 1dBi Antenne mit Versand aktuell bei ca. 50 Euro. 
+
+**Unterstützte ESP32-Varianten:**
+- ESP32-DEV (WROOM-32, getestet)
+- ESP32-WROOM-32U (mit externem Antennenanschluss)
+- ESP32-C3 (experimentell, Code vorbereitet aber auskommentiert)
+
+**Kommunikation:**
+- R200 ↔ ESP32 (UART): 115200 Baud
+- USB/Serial (nach außen): 19200 Baud
+- BLE: Nordic UART Service
+
+Passende RFID-Aufkleber können bei aliexpress.com bezogen werden.<br>
 
 ## Beispielhardware/Bezugsquellen:
 
@@ -26,32 +57,103 @@ ESP32-WROOM-32U mit externem Antennenanschluss:<br>
 https://amzn.eu/d/12kL505
 <br><br>
 kleine RFID-Tags (Carrera Hybrid):<br>
-https://amzn.eu/d/fBFeS80
+https://de.aliexpress.com/item/1005003501876260.html (2515-Wet inlay)
 <br>Anmerkung:<br>
 Die Tags haben im Auslieferungszustand alle die gleiche ID (EPC).<br>
-Mit Hilfe des Sketches RFID-Label-Writer.ino  kann die ID neu geschrieben werden. Dazu den Sketch auf den ESP32 laden und danach alle Tags einzeln an die Antenne halten. Die ID wird von 1 automatisch hochgezählt. Textausgabe kann über Serial angesehen werden.
+Über die configuration.html oder per CMD_WRITE_RFID Befehl ein Tag beschrieben werden.
 <br><br>
 
-## Aufbau/Verdrahtung ohne Platine (ESP32-DEV)
-R200 5V <--> ESP32 5V<br>
-R200 TX <--> ESP32 GPIO 17<br>
-R200 RX <--> ESP32 GPIO 16<br>
-R200 GND <--> ESP32 GND<br><br>
-optionale RFID LED:<br> 
-Der Anschluss der RFID LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 32 (ESP32-DEV).<br><br>
-optionale BLE LED<br>
-Der Anschluss der BLE LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 33 (ESP32-DEV).<br><br> 
-optionale WEBSOCKET LED<br>
-Der Anschluss der WEBSOCKET LED erfolgt mit Anode (+) an 3,3V und Kathode (-) über Vorwiderstand an Pin 25 (ESP32-DEV).<br><br>
-optinaler Taster:<br>
-Der Taster wird an GND und Pin 23 (ESP32-DEV) angeschlossen.<br>
+## Konfiguration
 
-## Verwendung Adapter-Platine (Plug & Play):<br>
+Der RFID-Connector kann auf drei Arten konfiguriert werden:
+
+### 1. USB/Serial-Konfiguration
+- Öffne [configuration.html](configuration.html) im Browser (Chrome/Edge)
+- Verbinde per USB (19200 Baud)
+- Vollständige Konfiguration ohne WiFi-Verbindung möglich
+- Ideal für initiales Setup oder Fehlerdiagnose
+
+### 2. BLE-Konfiguration
+- Öffne [configuration.html](configuration.html) im Browser (Chrome/Edge)
+- Verbinde per Bluetooth Low Energy
+- BLE-Name: "RFID-Connector"
+- Service: Nordic UART Service (6E400001-B5A3-F393-E0A9-E50E24DCCA9E)
+
+### 3. CH Racing Club
+- Verbinde per Bluetooth Low Energy
+- Am verbundenen Gerät können die Einstellungen vorgenommen werden
+
+### Verfügbare Kommandos (USB/BLE)
+
+Die folgenden Befehle können über USB/Serial oder BLE gesendet werden:
+
+**System & Info:**
+- `CMD_GET_VERSION` - Firmware-Version abrufen
+- `CMD_GET_MAC` - BLE-MAC-Adresse abrufen
+- `CMD_GET_CONFIG` - Komplette Konfiguration abrufen
+- `CMD_SAVE_SETTINGS` - Einstellungen im Flash speichern
+- `CMD_REBOOT` - ESP32 neu starten
+
+**RFID-Einstellungen:**
+- `CMD_GET_POWER` / `CMD_SET_POWER:<10-26>` - Power Level (dBm)
+- `CMD_GET_DENSE_MODE` / `CMD_SET_DENSE_MODE:<0|1>` - Dense Mode ein/aus
+- `CMD_GET_MIN_LAP_TIME` / `CMD_SET_MIN_LAP_TIME:<ms>` - Minimale Rundenzeit
+
+**WiFi & WebSocket:**
+- `CMD_GET_WIFI` / `CMD_SET_WIFI:<ssid>,<password>` - WiFi-Konfiguration
+- `CMD_GET_WEBSOCKET_SERVER` / `CMD_SET_WEBSOCKET_SERVER:<url>` - WebSocket-URL
+
+**RFID-Mappings:**
+- `CMD_GET_MAPPINGS` - Alle Mappings anzeigen
+- `CMD_SET_MAPPING:<tag_id>,<controller_id>` - Mapping setzen
+- `CMD_REMOVE_MAPPING:<tag_id>` - Mapping entfernen
+- `CMD_CLEAR_MAPPINGS` - Alle Mappings löschen
+- `CMD_RESET_RFID_STORAGE` - RFID-Speicher zurücksetzen
+
+**RFID-Tag Programmierung:**
+- `CMD_WRITE_RFID:<1-255>` - RFID-Tag mit neuer ID beschreiben
+
+<br>
+
+## Aufbau/Verdrahtung ohne Platine (ESP32-DEV)
+
+**R200 ↔ ESP32 Verbindung (115200 Baud):**
+- R200 5V ↔ ESP32 5V
+- R200 TX ↔ ESP32 GPIO 17 (RX)
+- R200 RX ↔ ESP32 GPIO 16 (TX)
+- R200 GND ↔ ESP32 GND
+
+**Optionale Status-LEDs (Kathode über Vorwiderstand):**
+- RFID LED: Pin 32 (Anode an 3,3V, Kathode über Vorwiderstand an Pin 32)
+- BLE LED: Pin 33 (Anode an 3,3V, Kathode über Vorwiderstand an Pin 33)
+- WebSocket LED: Pin 25 (Anode an 3,3V, Kathode über Vorwiderstand an Pin 25)
+
+**Optionaler Reset-Taster:**
+- Taster zwischen GND und Pin 23
+
+> **Hinweis:** Bei Verwendung von ESP32-C3 ändern sich die Pin-Zuordnungen (siehe Code).
+
+## Verwendung Adapter-Platine (Plug & Play)
+
 Platinen können auf Anfrage zum Selbstkostenpreis bezogen werden.
 
 <img src="../images/RFID-Connector_Platine_vorne.jpg" width=300px/>
 <img src="../images/RFID-Connector_Platine_hinten.jpg" width=300px/>
 <img src="../KiCad/RFID-Connector/RFID-Connector_Front.jpg" width=300px/><img src="../KiCad/RFID-Connector/RFID-Connector_Back.jpg" width=300px/>
+
+## Technische Details
+
+- **Firmware-Version:** 2.0.0
+- **RFID-Modul:** Inveton R200 (ESP32 ↔ R200: 115200 Baud, Europa-Frequenz konfiguriert)
+- **Max. RFID-Tags:** 8 (SmartRace) / 30 (CH Racing Club)
+- **Max. Mappings:** 30 Tag-zu-Controller-Zuordnungen
+- **Standard Power Level:** 26 dBm (einstellbar 10-26 dBm)
+- **Standard Min. Lap Time:** 3000 ms
+- **BLE Service:** Nordic UART Service (UUID: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E)
+- **USB/Serial:** 19200 Baud, 8N1 (PC ↔ ESP32)
+- **Preferences-Namespace:** "rfid_connector"
+
+## Bilder
 
 
 ## Montage der 1dbi Antenne als Brücke über Start/Ziel:
