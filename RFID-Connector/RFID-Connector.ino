@@ -22,7 +22,7 @@ using namespace websockets;
 
 #define WEBSOCKET_PING_INTERVAL 5000
 
-#define VERSION "2.0.0"
+#define VERSION "2.0.1"
 //#define DEBUG
 
 //#define ESP32C3
@@ -318,7 +318,7 @@ void processCommands(String command, bool fromBle = false) {
   }
   else if (command.equalsIgnoreCase("CMD_GET_MIN_LAP_TIME")) {
     getMinLapTimeResponse(fromBle);
-  }  
+  }
   else if (command.indexOf("CMD_SET_MIN_LAP_TIME:") >= 0) {
     int separatorIndex = command.indexOf(':');
     String minLapTimeString = command.substring(separatorIndex + 1);
@@ -456,7 +456,7 @@ void processCommands(String command, bool fromBle = false) {
     String rfidId = command.substring(separatorIndex + 1);
     rfidId.trim();
     int lastByte = rfidId.toInt();
-    if (lastByte < 0| lastByte > 255) {
+    if (lastByte < 0 || lastByte > 255) {
       String response = "MSG_WRITE_RFID:ERROR";
       Serial.println(response);
       if (fromBle) {
@@ -627,7 +627,7 @@ void sendFinishLineMessage(int controller_id, unsigned long timestamp, String rf
       websocketClient->send(wsMessage);
       send_ok = true;
   }
-  if(send_ok) {
+  if (send_ok || (!bleConnected && (websocketClient == nullptr || !websocketClient->available()))) {
     ledOn(RFID_LED_PIN);
   } else {
     ledOff(RFID_LED_PIN);
@@ -1055,7 +1055,7 @@ bool writeRfidEpc(const int newEpcId) {
   }
 
   Serial.println("Writing new EPC...");
-  //Set Select parameter 
+  //Set Select parameter
   unsigned char selectCommand[26];
   selectCommand[0] = 0xAA; // Header
   selectCommand[1] = 0x00; // Type
@@ -1274,8 +1274,8 @@ void setup() {
       if (websocketServer != "") {
         bool res = connectWebsocket();
         int retry = 0;
-        while (res == false and retry < 5) {
-          connectWebsocket();
+        while (res == false && retry < 5) {
+          res = connectWebsocket();
           retry += 1;
         }
       }
@@ -1328,8 +1328,8 @@ void loop() {
       ledOff(WEBSOCKET_LED_PIN);
       bool res = connectWebsocket();
       int retry = 0;
-      while (res == false and retry < 5) {
-        connectWebsocket();
+      while (res == false && retry < 5) {
+        res = connectWebsocket();
         retry += 1;
       }
     }
@@ -1357,7 +1357,7 @@ void processSerialCommands() {
     String command = serial_usb_command_data.substring(0, index_newline);
     serial_usb_command_data = serial_usb_command_data.substring(index_newline + 1);
     
-    command.trim(); 
+    command.trim();
     if (command.length() > 0) {
       processCommands(command);
     }
@@ -1420,4 +1420,3 @@ void onEventsCallback(WebsocketsEvent event, String data) {
     #endif
   }
 }
-    
