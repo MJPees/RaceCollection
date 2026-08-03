@@ -1,0 +1,16 @@
+{
+  "name": "RFID-Connector (ESP32-DEV, PCB V1.0)",
+  "version": "2.0.1",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "../firmware/RFID-Connector-ESP32-DEV-PCB_V1.0/RFID-Connector.ino.bootloader.bin", "offset": 4096 },
+        { "path": "../firmware/RFID-Connector-ESP32-DEV-PCB_V1.0/RFID-Connector.ino.partitions.bin", "offset": 32768 },
+        { "path": "../firmware/RFID-Connector-ESP32-DEV-PCB_V1.0/boot_app0.bin", "offset": 57344 },
+        { "path": "../firmware/RFID-Connector-ESP32-DEV-PCB_V1.0/RFID-Connector.ino.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}

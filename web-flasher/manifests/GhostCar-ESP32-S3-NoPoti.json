@@ -1,0 +1,16 @@
+{
+  "name": "GhostCar (ESP32-S3, NoPoti)",
+  "version": "1.4.3",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "../firmware/GhostCar-ESP32-S3-NoPoti/GhostCar.ino.bootloader.bin", "offset": 0 },
+        { "path": "../firmware/GhostCar-ESP32-S3-NoPoti/GhostCar.ino.partitions.bin", "offset": 32768 },
+        { "path": "../firmware/GhostCar-ESP32-S3-NoPoti/boot_app0.bin", "offset": 57344 },
+        { "path": "../firmware/GhostCar-ESP32-S3-NoPoti/GhostCar.ino.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}

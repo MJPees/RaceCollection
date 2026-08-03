@@ -1,0 +1,15 @@
+{
+  "name": "RFID-Label-Writer (ESP32-DEV)",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "../firmware/RFID-Label-Writer-ESP32-DEV/RFID-Label-Writer.ino.bootloader.bin", "offset": 4096 },
+        { "path": "../firmware/RFID-Label-Writer-ESP32-DEV/RFID-Label-Writer.ino.partitions.bin", "offset": 32768 },
+        { "path": "../firmware/RFID-Label-Writer-ESP32-DEV/boot_app0.bin", "offset": 57344 },
+        { "path": "../firmware/RFID-Label-Writer-ESP32-DEV/RFID-Label-Writer.ino.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}
