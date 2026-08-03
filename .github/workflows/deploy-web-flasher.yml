@@ -36,7 +36,7 @@ jobs:
           # Versucht Pages automatisch zu aktivieren, falls noch nicht geschehen.
           # Schlägt das fehl, muss der Repo-Owner Pages einmalig aktivieren:
           # Settings -> Pages -> Source: "GitHub Actions"
-          enablement: enabled
+          enablement: true
 
       - name: Upload web-flasher artifact
         uses: actions/upload-pages-artifact@v3
