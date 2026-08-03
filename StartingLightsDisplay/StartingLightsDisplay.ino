@@ -49,6 +49,9 @@ void displayImage(const char* imagePath, bool forceUpdate = false);
 String currentStatus = "idle";
 unsigned long idleStartTime = 0;
 
+// display orientation: true = 180° gedreht (USB-Anschluss rechts)
+bool displayRotated = false;
+
 // display backlight control
 int backlightLevel = 80;                     // Initialer Helligkeitswert
 int lastButtonState = HIGH;                  // Vorheriger Tasterzustand
@@ -159,6 +162,7 @@ void printCmdList() {
   logMsg(" CMD_GET_VERSION - Get firmware version");
   logMsg(" CMD_STATUS_SET:<idle|prepare_for_start|starting|running|suspended|ended> - Set current status");
   logMsg(" CMD_COUNTDOWN_SET:<pattern> - Set countdown lights, 7-digit pattern (e.g. 1111100)");
+  logMsg(" CMD_SET_ROTATION:<0|1> - Rotate display by 180 degrees (1 = USB on the right)");
   logMsg(" CMD_SET_IDLE - Set status to idle and show idle image");
   logMsg(" CMD_YELLOW_FLAG - Show yellow flag image");
   logMsg(" CMD_RED_FLAG - Show red flag image");
@@ -197,6 +201,7 @@ void commandGetConfig(bool fromBle = false) {
   sendWebsocketResponse(fromBle);
   sendVersionResponse(fromBle);
   sendMacResponse(fromBle);
+  respond("MSG_GET_ROTATION:" + String(displayRotated ? "1" : "0"), fromBle);
   respond("MSG_GET_CONFIG:OK", fromBle);
 }
 
@@ -230,6 +235,17 @@ void commandSetWifi(String ssidData, bool fromBle = false) {
 void commandSaveSettings(bool fromBle = false) {
   configurationSave();
   respond("MSG_SAVE_SETTINGS:OK", fromBle);
+}
+
+void commandSetRotation(String value, bool fromBle = false) {
+  if (value == "0" || value == "1") {
+    displayRotated = (value == "1");
+    LCD_SetRotation(displayRotated);
+    currentImage = ""; // loop() zeichnet das aktuelle Bild in neuer Ausrichtung neu
+    respond("MSG_SET_ROTATION:OK", fromBle);
+  } else {
+    respond("MSG_SET_ROTATION:INVALID", fromBle);
+  }
 }
 
 struct CountdownPatternMap {
@@ -346,6 +362,11 @@ void processCommands(String command, bool fromBle = false) {
     return;
   }
 
+  if (command.startsWith("CMD_SET_ROTATION:")) {
+    commandSetRotation(commandPayload(command), fromBle);
+    return;
+  }
+
   for (const auto& e : CMD_TABLE) {
     if (command.equalsIgnoreCase(e.cmd)) {
       e.fn(fromBle);
@@ -394,6 +415,7 @@ void configurationSave() {
   preferences.putString("wifi_ssid", wifiSsid);
   preferences.putString("wifi_password", wifiPassword);
   preferences.putString("websocket", websocketServer);
+  preferences.putBool("rotated", displayRotated);
   logMsg("Konfiguration gespeichert.");
 }
 
@@ -402,8 +424,11 @@ void configurationLoad() {
   wifiSsid = preferences.getString("wifi_ssid", "");
   wifiPassword = preferences.getString("wifi_password", "");
   websocketServer = preferences.getString("websocket", "");
+  displayRotated = preferences.getBool("rotated", false);
+  LCD_SetRotation(displayRotated);
   logMsg("WiFi SSID: %s", wifiSsid.c_str());
   logMsg("Websocket Server: %s", websocketServer.c_str());
+  logMsg("Display rotated: %s", displayRotated ? "1" : "0");
 }
 
 void initBLE() {

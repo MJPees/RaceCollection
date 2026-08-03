@@ -64,14 +64,10 @@ void LCD_Init(void)
   SPI_Init();
 
   LCD_Reset();
-  //************* Start Initial Sequence **********// 
+  //************* Start Initial Sequence **********//
   LCD_WriteCommand(0x11);
   delay(120);
-  LCD_WriteCommand(0x36);
-  if (HORIZONTAL)
-      LCD_WriteData(0x00);
-  else
-      LCD_WriteData(0x70);
+  LCD_SetRotation(false);
 
   LCD_WriteCommand(0x3A);
   LCD_WriteData(0x05);
@@ -152,6 +148,21 @@ void LCD_Init(void)
   LCD_WriteCommand(0x11);
   delay(120);
   LCD_WriteCommand(0x29); 
+}
+/******************************************************************************
+function: Set panel orientation via MADCTL (0x36)
+parameter :
+    rotated:  true = 180° gedreht (MX|MY gespiegelt)
+Die sichtbaren 172 Spalten liegen symmetrisch im 240er-Controller-RAM
+(Offset 34 auf beiden Seiten), daher bleiben Offset_X/Offset_Y unverändert.
+******************************************************************************/
+void LCD_SetRotation(bool rotated)
+{
+  LCD_WriteCommand(0x36);
+  if (HORIZONTAL)
+      LCD_WriteData(rotated ? 0xC0 : 0x00);
+  else
+      LCD_WriteData(rotated ? 0xB0 : 0x70);
 }
 /******************************************************************************
 function: Set the cursor position
