@@ -10,6 +10,10 @@ on:
       - '.github/workflows/build-GhostCar-ESP32-C3-Poti.yml'
       - 'dev-tools/github-workflow-files/flasher/**'
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -177,3 +181,45 @@ jobs:
           #name: ${{ steps.timestamp_gen.outputs.BUILD_DATE }}-GhostCar-ESP32-C3-Poti
           name: GhostCar-ESP32-C3-Poti
           retention-days: 7
+
+      - name: Update web-flasher firmware
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SUB_DIR="GhostCar-ESP32C3-Poti"
+          WEB_DIR="web-flasher/firmware/GhostCar-ESP32-C3-Poti"
+
+          mkdir -p "${WEB_DIR}"
+          cp ./artifact_package/${SUB_DIR}/bin/*.bin "${WEB_DIR}/"
+
+          git add "${WEB_DIR}"
+          if git diff --cached --quiet; then
+            echo "Keine Firmware-Änderungen für den Web-Flasher."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "🤖 chore: update web-flasher firmware (GhostCar-ESP32-C3-Poti)"
+
+          # Mehrere Build-Workflows können gleichzeitig auf main pushen -> Rebase-Retry
+          for i in 1 2 3 4 5; do
+            git fetch origin main
+            if ! git rebase origin/main; then
+              git rebase --abort || true
+              echo "Rebase fehlgeschlagen."
+              exit 1
+            fi
+            if git push origin HEAD:main; then
+              break
+            fi
+            if [ "$i" = "5" ]; then
+              echo "Push nach 5 Versuchen fehlgeschlagen."
+              exit 1
+            fi
+            sleep $(( (RANDOM % 10) + 3 ))
+          done
+
+          # Pushes mit GITHUB_TOKEN lösen keine Workflows aus -> Pages-Deploy explizit anstoßen
+          gh workflow run deploy-web-flasher.yml --ref main || echo "::warning::Pages-Deploy konnte nicht getriggert werden."
