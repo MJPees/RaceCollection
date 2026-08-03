@@ -1,0 +1,48 @@
+name: Deploy Web-Flasher to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web-flasher/**'
+      - '.github/workflows/deploy-web-flasher.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Nur ein Pages-Deployment gleichzeitig; laufende Deployments nicht abbrechen
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        with:
+          # Versucht Pages automatisch zu aktivieren, falls noch nicht geschehen.
+          # Schlägt das fehl, muss der Repo-Owner Pages einmalig aktivieren:
+          # Settings -> Pages -> Source: "GitHub Actions"
+          enablement: enabled
+
+      - name: Upload web-flasher artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web-flasher
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
