@@ -1,0 +1,16 @@
+{
+  "name": "StartingLightsDisplay (ESP32-C6)",
+  "version": "1.0.4",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C6",
+      "parts": [
+        { "path": "../firmware/StartingLightsDisplay-ESP32-C6/StartingLightsDisplay.ino.bootloader.bin", "offset": 0 },
+        { "path": "../firmware/StartingLightsDisplay-ESP32-C6/StartingLightsDisplay.ino.partitions.bin", "offset": 32768 },
+        { "path": "../firmware/StartingLightsDisplay-ESP32-C6/boot_app0.bin", "offset": 57344 },
+        { "path": "../firmware/StartingLightsDisplay-ESP32-C6/StartingLightsDisplay.ino.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}
