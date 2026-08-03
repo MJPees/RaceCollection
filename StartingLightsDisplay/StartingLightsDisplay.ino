@@ -8,6 +8,8 @@
 #include "src/Display_ST7789.h"
 #include "src/LCD_Image.h"
 
+// Defensiv: Falls ein zuvor eingebundener Header ein "local"-Makro definiert,
+// würde es die BLE-Header zerschießen – daher vor deren Include entfernen.
 #ifdef local
   #undef local
 #endif
@@ -44,7 +46,6 @@ void displayImage(const char* imagePath, bool forceUpdate = false);
 
 String currentStatus = "idle";
 unsigned long idleStartTime = 0;
-unsigned long now = 0;
 
 // display backlight control
 int backlightLevel = 80;                     // Initialer Helligkeitswert
@@ -68,7 +69,7 @@ BLECharacteristic* pTxCharacteristic = NULL;
 BLECharacteristic* pRxCharacteristic = NULL;
 volatile bool bleConnected = false;
 
-String serial_usb_command_data = "";
+String serialCommandBuffer = "";
 
 // Pending actions deferred to loop() to avoid blocking BLE task
 volatile bool pendingFinishRace  = false;
@@ -76,12 +77,27 @@ volatile bool pendingYellowFlag  = false;
 volatile bool pendingRedFlag     = false;
 
 // Logger - nutzt printf (UART0), funktioniert unabhängig vom USB-CDC-Status
-void log(const char* format, ...) {
+void logMsg(const char* format, ...) {
   va_list args;
   va_start(args, format);
   vprintf(format, args);
   va_end(args);
   printf("\r\n");
+}
+
+// Antwort loggen und bei BLE-Herkunft zusätzlich an den Client senden
+void respond(const String &response, bool fromBle) {
+  logMsg("%s", response.c_str());
+  if (fromBle) {
+    sendBleResponse(response);
+  }
+}
+
+// Liefert den Teil eines Befehls nach dem ersten ':' (getrimmt)
+String commandPayload(const String &command) {
+  String payload = command.substring(command.indexOf(':') + 1);
+  payload.trim();
+  return payload;
 }
 
 void displayImage(const char* imagePath, bool forceUpdate) {
@@ -124,108 +140,77 @@ void displayImage(const char* imagePath, bool forceUpdate) {
     }
 
   } else {
-    log("Error: Invalid image path provided.");
+    logMsg("Error: Invalid image path provided.");
   }
 }
 
 void printCmdList() {
-  log("Available Commands:");
-  log(" CMD_GET_CONFIG - Get current configuration");
-  log(" CMD_GET_WIFI - Get current WiFi SSID and password");
-  log(" CMD_SET_WIFI:<ssid>,<password> - Set WiFi SSID and password");
-  log(" CMD_GET_WEBSOCKET_SERVER - Get Websocket server URL");
-  log(" CMD_SET_WEBSOCKET_SERVER:<url> - Set Websocket server URL");
-  log(" CMD_SAVE_SETTINGS - Save current settings to flash");
-  log(" CMD_REBOOT - Reboot device");
-  log(" CMD_GET_MAC - Get BLE-MAC address");
-  log(" CMD_GET_VERSION - Get firmware version");
-  log(" CMD_STATUS_SET:<idle|prepare_for_start|starting|running|suspended|ended> - Set current status");
-  log(" CMD_SET_IDLE - Set status to idle and show idle image");
-  log(" CMD_YELLOW_FLAG - Show yellow flag image");
-  log(" CMD_RED_FLAG - Show red flag image");
-  log(" CMD_FINISH_RACE - Show finish race image");
-  log("############################");
+  logMsg("Available Commands:");
+  logMsg(" CMD_GET_CONFIG - Get current configuration");
+  logMsg(" CMD_GET_WIFI - Get current WiFi SSID and password");
+  logMsg(" CMD_SET_WIFI:<ssid>,<password> - Set WiFi SSID and password");
+  logMsg(" CMD_GET_WEBSOCKET_SERVER - Get Websocket server URL");
+  logMsg(" CMD_SET_WEBSOCKET_SERVER:<url> - Set Websocket server URL");
+  logMsg(" CMD_SAVE_SETTINGS - Save current settings to flash");
+  logMsg(" CMD_REBOOT - Reboot device");
+  logMsg(" CMD_GET_MAC - Get BLE-MAC address");
+  logMsg(" CMD_GET_VERSION - Get firmware version");
+  logMsg(" CMD_STATUS_SET:<idle|prepare_for_start|starting|running|suspended|ended> - Set current status");
+  logMsg(" CMD_COUNTDOWN_SET:<pattern> - Set countdown lights, 7-digit pattern (e.g. 1111100)");
+  logMsg(" CMD_SET_IDLE - Set status to idle and show idle image");
+  logMsg(" CMD_YELLOW_FLAG - Show yellow flag image");
+  logMsg(" CMD_RED_FLAG - Show red flag image");
+  logMsg(" CMD_FINISH_RACE - Show finish race image");
+  logMsg("############################");
 }
 
-void getWifiResponse(bool fromBle = false) {
-  String response = "MSG_GET_WIFI:" + wifiSsid + "," + wifiPassword;
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+void sendWifiResponse(bool fromBle = false) {
+  respond("MSG_GET_WIFI:" + wifiSsid + "," + wifiPassword, fromBle);
 }
 
-void getWebsocketResponse(bool fromBle = false) {
-  String response = "MSG_GET_WEBSOCKET_SERVER:" + websocketServer;
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+void sendWebsocketResponse(bool fromBle = false) {
+  respond("MSG_GET_WEBSOCKET_SERVER:" + websocketServer, fromBle);
 }
 
-void getVersionResponse(bool fromBle = false) {
-  String response = "MSG_GET_VERSION:" + String(VERSION);
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+void sendVersionResponse(bool fromBle = false) {
+  respond("MSG_GET_VERSION:" + String(VERSION), fromBle);
 }
 
-void getMacResponse(bool fromBle = false) {
+void sendMacResponse(bool fromBle = false) {
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_BT);
   char macStr[18];
   snprintf(macStr, sizeof(macStr), "%02X%02X%02X%02X%02X%02X",
             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  String response = "MSG_GET_MAC:" + String(macStr);
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+  respond("MSG_GET_MAC:" + String(macStr), fromBle);
 }
 
 void commandReboot(bool fromBle = false) {
-  String response = "MSG_REBOOT:OK";
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+  respond("MSG_REBOOT:OK", fromBle);
   restartEsp32();
 }
 
 void commandGetConfig(bool fromBle = false) {
-  getWifiResponse(fromBle);
-  getWebsocketResponse(fromBle);
-  getVersionResponse(fromBle);
-  getMacResponse(fromBle);
-  String response = "MSG_GET_CONFIG:OK";
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+  sendWifiResponse(fromBle);
+  sendWebsocketResponse(fromBle);
+  sendVersionResponse(fromBle);
+  sendMacResponse(fromBle);
+  respond("MSG_GET_CONFIG:OK", fromBle);
 }
 
-void commandSetWebsocketServer(String command, bool fromBle = false) {
-  int separatorIndex = command.indexOf(':');
-  String urlData = command.substring(separatorIndex + 1);
-  urlData.trim();
+void commandSetWebsocketServer(String urlData, bool fromBle = false) {
   if (urlData.length() > 0) {
     websocketServer = urlData;
     if (websocketServer.startsWith("ws://") == false && websocketServer.startsWith("wss://") == false) {
       websocketServer = "ws://" + websocketServer;
     }
-    String response = "MSG_SET_WEBSOCKET_SERVER:OK";
-    log("%s", response.c_str());
-    if (fromBle) {
-      sendBleResponse(response);
-    }
+    respond("MSG_SET_WEBSOCKET_SERVER:OK", fromBle);
+  } else {
+    respond("MSG_SET_WEBSOCKET_SERVER:INVALID", fromBle);
   }
 }
 
-void commandSetWifi(String command, bool fromBle = false) {
-  int separatorIndex = command.indexOf(':');
-  String ssidData = command.substring(separatorIndex + 1);
-  ssidData.trim();
+void commandSetWifi(String ssidData, bool fromBle = false) {
   int commaIndex = ssidData.indexOf(',');
   if (commaIndex > 0) {
     wifiSsid = ssidData.substring(0, commaIndex);
@@ -237,20 +222,12 @@ void commandSetWifi(String command, bool fromBle = false) {
     wifiSsid = "";
     wifiPassword = "";
   }
-  String response = "MSG_SET_WIFI:OK";
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+  respond("MSG_SET_WIFI:OK", fromBle);
 }
 
 void commandSaveSettings(bool fromBle = false) {
   configurationSave();
-  String response = "MSG_SAVE_SETTINGS:OK";
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+  respond("MSG_SAVE_SETTINGS:OK", fromBle);
 }
 
 struct CountdownPatternMap {
@@ -294,8 +271,7 @@ void commandSetStatus(String status, bool fromBle = false) {
     response = "MSG_STATUS_SET:OK";
   }
 
-  log("%s", response.c_str());
-  if (fromBle) sendBleResponse(response);
+  respond(response, fromBle);
 }
 
 void commandSetIdle(bool fromBle = false) {
@@ -319,11 +295,7 @@ void commandSetCountdown(String pattern, bool fromBle = false) {
   }
 
   displayImage(filename, true);
-  String response = "MSG_COUNTDOWN_SET:OK";
-  log("%s", response.c_str());
-  if (fromBle) {
-    sendBleResponse(response);
-  }
+  respond("MSG_COUNTDOWN_SET:OK", fromBle);
 }
 
 void yellowFlag(bool fromBle = false);
@@ -340,11 +312,11 @@ struct CmdEntry {
 static const CmdEntry CMD_TABLE[] = {
   {"CMD_REBOOT",        commandReboot},
   {"CMD_GET_CONFIG",    commandGetConfig},
-  {"CMD_GET_WIFI",      getWifiResponse},
-  {"CMD_GET_WEBSOCKET_SERVER", getWebsocketResponse},
+  {"CMD_GET_WIFI",      sendWifiResponse},
+  {"CMD_GET_WEBSOCKET_SERVER", sendWebsocketResponse},
   {"CMD_SAVE_SETTINGS", commandSaveSettings},
-  {"CMD_GET_VERSION",   getVersionResponse},
-  {"CMD_GET_MAC",       getMacResponse},
+  {"CMD_GET_VERSION",   sendVersionResponse},
+  {"CMD_GET_MAC",       sendMacResponse},
   {"CMD_SET_IDLE",      commandSetIdle},
   {"CMD_YELLOW_FLAG",   yellowFlag},
   {"CMD_RED_FLAG",      redFlag},
@@ -353,28 +325,22 @@ static const CmdEntry CMD_TABLE[] = {
 
 void processCommands(String command, bool fromBle = false) {
   if (command.startsWith("CMD_SET_WIFI:")) {
-    commandSetWifi(command, fromBle);
+    commandSetWifi(commandPayload(command), fromBle);
     return;
   }
 
   if (command.startsWith("CMD_SET_WEBSOCKET_SERVER:")) {
-    commandSetWebsocketServer(command, fromBle);
+    commandSetWebsocketServer(commandPayload(command), fromBle);
     return;
   }
 
   if (command.startsWith("CMD_COUNTDOWN_SET:")) {
-    int separatorIndex = command.indexOf(':');
-    String pattern = command.substring(separatorIndex + 1);
-    pattern.trim();
-    commandSetCountdown(pattern, fromBle);
+    commandSetCountdown(commandPayload(command), fromBle);
     return;
   }
 
   if (command.startsWith("CMD_STATUS_SET:")) {
-    int separatorIndex = command.indexOf(':');
-    String status = command.substring(separatorIndex + 1);
-    status.trim();
-    commandSetStatus(status, fromBle);
+    commandSetStatus(commandPayload(command), fromBle);
     return;
   }
 
@@ -385,18 +351,18 @@ void processCommands(String command, bool fromBle = false) {
     }
   }
 
-  log("Unknown command: %s", command.c_str());
+  logMsg("Unknown command: %s", command.c_str());
 }
 
 // BLE Server Callbacks
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       bleConnected = true;
-      log("BLE: client connected");
+      logMsg("BLE: client connected");
     }
     void onDisconnect(BLEServer* pServer) {
       bleConnected = false;
-      log("BLE: client disconnected");
+      logMsg("BLE: client disconnected");
       pServer->startAdvertising(); // Restart advertising on disconnect
     }
 };
@@ -422,34 +388,20 @@ void sendBleResponse(const String &response) {
   }
 }
 
-void sendBleResponse(const char *response) {
-  if (bleConnected && pTxCharacteristic != NULL) {
-    pTxCharacteristic->setValue(response);
-    pTxCharacteristic->notify();
-  }
-}
-
 void configurationSave() {
   preferences.putString("wifi_ssid", wifiSsid);
   preferences.putString("wifi_password", wifiPassword);
   preferences.putString("websocket", websocketServer);
-  log("Konfiguration gespeichert.");
+  logMsg("Konfiguration gespeichert.");
 }
 
 void configurationLoad() {
-  log("Konfiguration laden...");
+  logMsg("Konfiguration laden...");
   wifiSsid = preferences.getString("wifi_ssid", "");
   wifiPassword = preferences.getString("wifi_password", "");
   websocketServer = preferences.getString("websocket", "");
-  log("WiFi SSID: %s", wifiSsid.c_str());
-  log("Websocket Server: %s", websocketServer.c_str());
-}
-
-void wait(unsigned long waitTime) {
-  unsigned long startWaitTime = millis();
-  while((millis() - startWaitTime) < waitTime) {
-    delay(1);
-  }
+  logMsg("WiFi SSID: %s", wifiSsid.c_str());
+  logMsg("Websocket Server: %s", websocketServer.c_str());
 }
 
 void initBLE() {
@@ -459,7 +411,7 @@ void initBLE() {
   // Create BLE server
   pServer = BLEDevice::createServer();
   if (pServer == NULL) {
-    log("BLE: ERROR - Failed to create BLE server");
+    logMsg("BLE: ERROR - Failed to create BLE server");
     return;
   }
   pServer->setCallbacks(new MyServerCallbacks());
@@ -492,7 +444,7 @@ void initBLE() {
   pAdvertising->setMaxPreferred(0x12);
   BLEDevice::startAdvertising();
 
-  log("BLE: initialized and advertising");
+  logMsg("BLE: initialized and advertising");
   displayImage("/carrera_hybrid.png");
 }
 
@@ -507,50 +459,45 @@ void setup() {
   pinMode(BOOT_KEY_PIN, INPUT_PULLUP);
   pinMode(RGB_LED_PIN, OUTPUT);
 
-  log("LCD_Init...");
+  logMsg("LCD_Init...");
   LCD_Init();
-  log("LCD_Init done");
+  logMsg("LCD_Init done");
 
   SD_Init();
-  log("SD_Init done");
+  logMsg("SD_Init done");
 
   Set_Backlight(backlightLevel);
   rgbLedWrite(RGB_LED_PIN, 255, 255, 255);
 
-  log("Version: %s", VERSION);
-  log("############################");
+  logMsg("Version: %s", VERSION);
+  logMsg("############################");
   printCmdList();
 
   configurationLoad();
 
   // reserve buffer for serial commands to prevent fragmentation and ensure we can handle large commands
-  serial_usb_command_data.reserve(512);
+  serialCommandBuffer.reserve(512);
 
   // Init WiFi
   if (wifiSsid != "") {
     displayImage("/connect_wifi.png");
-    log("Connecting to WiFi SSID: %s", wifiSsid.c_str());
+    logMsg("Connecting to WiFi SSID: %s", wifiSsid.c_str());
     WiFi.setHostname(wifiHostname.c_str());
     WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
     int wifiAttempt = 0;
     while (WiFi.status() != WL_CONNECTED && wifiAttempt < 20) {
-      wait(500);
+      delay(500);
       printf(".");
       wifiAttempt++;
     }
     if (WiFi.status() == WL_CONNECTED) {
-      log("\r\nWiFi connected. IP: %s  Hostname: %s",
+      logMsg("\r\nWiFi connected. IP: %s  Hostname: %s",
              WiFi.localIP().toString().c_str(), WiFi.getHostname());
       if (websocketServer != "") {
-        bool res = connectWebsocket();
-        int retry = 0;
-        while (res == false && retry < 5) {
-          res = connectWebsocket();
-          retry += 1;
-        }
+        connectWebsocketWithRetry();
       }
     } else {
-      log("Failed to connect to WiFi.");
+      logMsg("Failed to connect to WiFi.");
     }
   }
 
@@ -560,7 +507,7 @@ void setup() {
 
 void loop() {
   processSerialCommands();
-  now = millis();
+  unsigned long now = millis();
 
   if (websocketWasConnected) {
     if(websocketClient != nullptr && websocketClient->available()) {
@@ -571,12 +518,7 @@ void loop() {
       }
     }
     else if(WiFi.status() == WL_CONNECTED) {
-      bool res = connectWebsocket();
-      int retry = 0;
-      while (res == false && retry < 5) {
-        res = connectWebsocket();
-        retry += 1;
-      }
+      connectWebsocketWithRetry();
     }
     else {
       delete websocketClient;
@@ -636,14 +578,14 @@ void processSerialCommands() {
     char buffer[255];
     int bytesRead = Serial.readBytes(buffer, len);
     buffer[bytesRead] = '\0';
-    serial_usb_command_data += buffer;
+    serialCommandBuffer += buffer;
   }
 
   // Solange ein Newline gefunden wird, extrahiere und verarbeite Befehle
   int index_newline;
-  while ((index_newline = serial_usb_command_data.indexOf('\n')) >= 0) {
-    String command = serial_usb_command_data.substring(0, index_newline);
-    serial_usb_command_data = serial_usb_command_data.substring(index_newline + 1);
+  while ((index_newline = serialCommandBuffer.indexOf('\n')) >= 0) {
+    String command = serialCommandBuffer.substring(0, index_newline);
+    serialCommandBuffer = serialCommandBuffer.substring(index_newline + 1);
 
     command.trim();
     if (command.length() > 0) {
@@ -653,18 +595,18 @@ void processSerialCommands() {
 }
 
 void restartEsp32() {
-  wait(100);
+  delay(100);
   preferences.end();
-  wait(100);
+  delay(100);
   ESP.restart();
 }
 
 bool connectWebsocket() {
   displayImage("/connect_websocket.png");
-  log("Websocket: connect ...");
+  logMsg("Websocket: connect ...");
 
   if (websocketServer == "") {
-    log("Websocket: server not configured.");
+    logMsg("Websocket: server not configured.");
     return false;
   }
 
@@ -677,34 +619,29 @@ bool connectWebsocket() {
   websocketClient->onMessage(onMessageCallback);
   websocketClient->onEvent(onEventsCallback);
 
-  log("Websocket: connecting %s", websocketServer.c_str());
+  logMsg("Websocket: connecting %s", websocketServer.c_str());
 
   websocketClient->connect(websocketServer);
 
   if(websocketClient->available()) {
-    log("Websocket: connected");
+    logMsg("Websocket: connected");
     websocketClient->send("{\"type\":\"controller_set\",\"data\":{\"controller_id\":\"Z\"}}");
-    log("Websocket: sent initial controller_set message");
+    logMsg("Websocket: sent initial controller_set message");
     return true;
   }
   delete websocketClient;
   websocketClient = nullptr;
-  log("Websocket: failed to connect");
+  logMsg("Websocket: failed to connect");
   return false;
 }
 
-void falseStart() {
-  for (int i = 0; i < 2; ++i) {
-    displayImage("/red_5.png", true);
-    wait(300);
-    displayImage("/off.png", true);
-    wait(300);
+bool connectWebsocketWithRetry() {
+  for (int attempt = 0; attempt < 6; ++attempt) {
+    if (connectWebsocket()) {
+      return true;
+    }
   }
-  displayImage("/false_start.png");
-}
-
-void stopRace() {
-  displayImage("/red_5.png");
+  return false;
 }
 
 void yellowFlag(bool fromBle) {
@@ -715,10 +652,10 @@ void yellowFlag(bool fromBle) {
   for (int i = 0; i < 4; ++i) {
     if(currentStatus != "suspended") return;
     displayImage("/yellow_5.png", true);
-    wait(300);
+    delay(300);
     if(currentStatus != "suspended") return;
     displayImage("/off.png", true);
-    wait(300);
+    delay(300);
   }
   if(currentStatus != "suspended") return;
   displayImage("/yellow_5.png");
@@ -732,10 +669,10 @@ void redFlag(bool fromBle) {
   for (int i = 0; i < 4; ++i) {
     if(currentStatus != "suspended") return;
     displayImage("/red_5.png", true);
-    wait(300);
+    delay(300);
     if(currentStatus != "suspended") return;
     displayImage("/off.png", true);
-    wait(300);
+    delay(300);
   }
   if(currentStatus != "suspended") return;
   displayImage("/red_5.png");
@@ -747,7 +684,7 @@ void finishRace(bool fromBle) {
     return;
   }
   displayImage("/finish_flag.png", true);
-  wait(1000);
+  delay(1000);
   displayImage("/finish.png");
 }
 
@@ -759,11 +696,11 @@ void handleWebsocketEvent(String type, JsonDocument doc) {
     if (data == "prepare_for_start") {
       displayImage("/off.png");
     } else if (data == "starting") {
-      wait(1000);
+      delay(1000);
       for(int i=1; i < 6; i++) {
         String imagePath = "/red_" + String(i) + ".png";
         displayImage(imagePath.c_str());
-        wait(900);
+        delay(900);
       }
     } else if (data == "running") {
       displayImage("/green_5.png");
@@ -788,7 +725,7 @@ void handleWebsocketEvent(String type, JsonDocument doc) {
     commandSetStatus("idle");
   } else {
     #ifdef DEBUG
-      log("Unknown message type: %s", type.c_str());
+      logMsg("Unknown message type: %s", type.c_str());
     #endif
   }
 }
@@ -797,38 +734,38 @@ void onMessageCallback(WebsocketsMessage message) {
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, message.data());
   if (error) {
-    log("Websocket: JSON deserialization failed: %s", error.c_str());
+    logMsg("Websocket: JSON deserialization failed: %s", error.c_str());
     return;
   }
 
   #ifdef DEBUG
     String _jsonDbg;
     serializeJsonPretty(doc, _jsonDbg);
-    log("Websocket: received message: %s", _jsonDbg.c_str());
+    logMsg("Websocket: received message: %s", _jsonDbg.c_str());
   #endif
 
   if (doc.containsKey("type")) {
     handleWebsocketEvent(doc["type"].as<String>(), doc);
   } else {
     #ifdef DEBUG
-      log("Received message without 'type' key: %s", message.data().c_str());
+      logMsg("Received message without 'type' key: %s", message.data().c_str());
     #endif
   }
 }
 
 void onEventsCallback(WebsocketsEvent event, String data) {
   if(event == WebsocketsEvent::ConnectionOpened) {
-      log("Websocket: connected");
+      logMsg("Websocket: connected");
       websocketWasConnected = true;
   } else if(event == WebsocketsEvent::ConnectionClosed) {
-    log("Websocket: connection closed");
+    logMsg("Websocket: connection closed");
     delete websocketClient;
     websocketClient = nullptr;
   } else if(event == WebsocketsEvent::GotPing) {
     if (websocketClient) websocketClient->pong();
   } else if(event == WebsocketsEvent::GotPong) {
     #ifdef DEBUG
-      log("Websocket: got a pong!");
+      logMsg("Websocket: got a pong!");
     #endif
   }
 }
