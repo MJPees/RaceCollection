@@ -1,6 +1,6 @@
 {
   "name": "StartingLightsDisplay (ESP32-C6)",
-  "version": "1.0.4",
+  "version": "2.0.0",
   "new_install_prompt_erase": true,
   "builds": [
     {
