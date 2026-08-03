@@ -34,6 +34,7 @@ using namespace websockets;
 #define CHARACTERISTIC_TX_UUID "6E400003-B5A3-F393-E0A9-E50E24DCCA9F"
 
 #define WEBSOCKET_PING_INTERVAL 5000
+#define WEBSOCKET_RECONNECT_INTERVAL 10000
 
 #define RGB_LED_PIN 8 // Pin für RGB-LED
 
@@ -65,7 +66,7 @@ String wifiHostname = "Starting-Light";
 WebsocketsClient *websocketClient = nullptr;
 String websocketServer = "";
 unsigned long websocketLastPing = 0;
-bool websocketWasConnected = false;
+unsigned long websocketLastReconnectAttempt = 0;
 
 /* BLE variables */
 const String bleName = "Starting-Light";
@@ -76,10 +77,11 @@ volatile bool bleConnected = false;
 
 String serialCommandBuffer = "";
 
-// Pending actions deferred to loop() to avoid blocking BLE task
-volatile bool pendingFinishRace  = false;
-volatile bool pendingYellowFlag  = false;
-volatile bool pendingRedFlag     = false;
+// BLE-Kommandos werden im Callback nur gepuffert und in loop() verarbeitet -
+// Display-/SD-Zugriffe und delay() dürfen nicht im BLE-Task laufen
+#define BLE_CMD_MAX_LEN 256
+#define BLE_CMD_QUEUE_LEN 8
+QueueHandle_t bleCommandQueue = nullptr;
 
 // Logger - nutzt printf (UART0), funktioniert unabhängig vom USB-CDC-Status
 void logMsg(const char* format, ...) {
@@ -319,6 +321,7 @@ void commandSetCountdown(String pattern, bool fromBle = false) {
 void yellowFlag(bool fromBle = false);
 void redFlag(bool fromBle = false);
 void finishRace(bool fromBle = false);
+bool connectWebsocket(bool showConnectImage = true);
 
 using CmdHandler = void (*)(bool);
 
@@ -394,10 +397,13 @@ class MyRxCharacteristicCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
       String rxData = pCharacteristic->getValue();
       // Validate BLE input length to prevent buffer overflow
-      if (rxData.length() > 0 && rxData.length() <= 256) {
-        // Process BLE command just like serial commands
-        rxData.trim();
-        processCommands(rxData, true);
+      if (rxData.length() > 0 && rxData.length() <= BLE_CMD_MAX_LEN) {
+        // Nur puffern - die Verarbeitung erfolgt in loop(), nicht im BLE-Task
+        char buffer[BLE_CMD_MAX_LEN + 1];
+        rxData.toCharArray(buffer, sizeof(buffer));
+        if (bleCommandQueue == nullptr || xQueueSend(bleCommandQueue, buffer, 0) != pdTRUE) {
+          logMsg("BLE: command queue full, dropping: %s", buffer);
+        }
       }
     }
 };
@@ -432,6 +438,9 @@ void configurationLoad() {
 }
 
 void initBLE() {
+  // Queue für BLE-Kommandos (Verarbeitung in loop())
+  bleCommandQueue = xQueueCreate(BLE_CMD_QUEUE_LEN, BLE_CMD_MAX_LEN + 1);
+
   // Create BLE device
   BLEDevice::init(bleName.c_str());
 
@@ -534,23 +543,27 @@ void setup() {
 
 void loop() {
   processSerialCommands();
+  processBleCommands();
   unsigned long now = millis();
 
-  if (websocketWasConnected) {
-    if(websocketClient != nullptr && websocketClient->available()) {
-      websocketClient->poll();
-      if(now > (websocketLastPing + WEBSOCKET_PING_INTERVAL)) {
-        websocketLastPing = now;
-        websocketClient->ping();
-      }
+  if (websocketClient != nullptr && websocketClient->available()) {
+    websocketClient->poll();
+    if(now > (websocketLastPing + WEBSOCKET_PING_INTERVAL)) {
+      websocketLastPing = now;
+      websocketClient->ping();
     }
-    else if(WiFi.status() == WL_CONNECTED) {
-      connectWebsocketWithRetry();
+  }
+  else if (websocketServer != "" && wifiSsid != "" && WiFi.status() == WL_CONNECTED) {
+    // Reconnect mit Intervall - greift auch, wenn der initiale Connect in setup() fehlschlug
+    if (now - websocketLastReconnectAttempt >= WEBSOCKET_RECONNECT_INTERVAL) {
+      websocketLastReconnectAttempt = now;
+      connectWebsocket(false); // aktuelles Bild nicht durch den Connect-Screen ersetzen
     }
-    else {
-      delete websocketClient;
-      websocketClient = nullptr;
-    }
+  }
+  else if (websocketClient != nullptr) {
+    // WiFi weg -> Client aufräumen; WiFi.setAutoReconnect stellt die Verbindung wieder her
+    delete websocketClient;
+    websocketClient = nullptr;
   }
 
   // show sponsor images in idle mode
@@ -582,20 +595,21 @@ void loop() {
     currentImage = requestedImage;
   }
 
-  // Execute actions deferred from BLE callbacks
-  if (pendingFinishRace) {
-    pendingFinishRace = false;
-    finishRace(false);
-  } else if (pendingYellowFlag) {
-    pendingYellowFlag = false;
-    yellowFlag(false);
-  } else if (pendingRedFlag) {
-    pendingRedFlag = false;
-    redFlag(false);
-  }
-
   lastButtonState = reading;
   delay(10);
+}
+
+void processBleCommands() {
+  if (bleCommandQueue == nullptr) return;
+
+  char buffer[BLE_CMD_MAX_LEN + 1];
+  while (xQueueReceive(bleCommandQueue, buffer, 0) == pdTRUE) {
+    String command = buffer;
+    command.trim();
+    if (command.length() > 0) {
+      processCommands(command, true);
+    }
+  }
 }
 
 void processSerialCommands() {
@@ -628,8 +642,10 @@ void restartEsp32() {
   ESP.restart();
 }
 
-bool connectWebsocket() {
-  displayImage("/connect_websocket.png");
+bool connectWebsocket(bool showConnectImage) {
+  if (showConnectImage) {
+    displayImage("/connect_websocket.png");
+  }
   logMsg("Websocket: connect ...");
 
   if (websocketServer == "") {
@@ -672,10 +688,6 @@ bool connectWebsocketWithRetry() {
 }
 
 void yellowFlag(bool fromBle) {
-  if (fromBle) {
-    pendingYellowFlag = true;
-    return;
-  }
   for (int i = 0; i < 4; ++i) {
     if(currentStatus != "suspended") return;
     displayImage("/yellow_5.png", true);
@@ -689,10 +701,6 @@ void yellowFlag(bool fromBle) {
 }
 
 void redFlag(bool fromBle) {
-  if (fromBle) {
-    pendingRedFlag = true;
-    return;
-  }
   for (int i = 0; i < 4; ++i) {
     if(currentStatus != "suspended") return;
     displayImage("/red_5.png", true);
@@ -706,10 +714,6 @@ void redFlag(bool fromBle) {
 }
 
 void finishRace(bool fromBle) {
-  if (fromBle) {
-    pendingFinishRace = true;
-    return;
-  }
   displayImage("/finish_flag.png", true);
   delay(1000);
   displayImage("/finish.png");
@@ -783,7 +787,6 @@ void onMessageCallback(WebsocketsMessage message) {
 void onEventsCallback(WebsocketsEvent event, String data) {
   if(event == WebsocketsEvent::ConnectionOpened) {
       logMsg("Websocket: connected");
-      websocketWasConnected = true;
   } else if(event == WebsocketsEvent::ConnectionClosed) {
     logMsg("Websocket: connection closed");
     delete websocketClient;
