@@ -207,6 +207,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "🤖 chore: update web-flasher firmware (GhostCar-StartingLights-ESP32-S3-NoPoti)"
 
+          # Build-Schritte ändern ggf. Quellen (z. B. config.h) -> vor dem Rebase verwerfen
+          git checkout -- .
+
           # Mehrere Build-Workflows können gleichzeitig auf main pushen -> Rebase-Retry
           for i in 1 2 3 4 5; do
             git fetch origin main
