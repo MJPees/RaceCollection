@@ -149,7 +149,7 @@ jobs:
           find ./${BUILD_OUTPUT_DIR}/ -name "${INO_FILE}.bin" -exec mv {} ${TARGET_BIN_DIR}/ \;
           find ./${BUILD_OUTPUT_DIR}/ -name "${INO_FILE}.bootloader.bin" -exec mv {} ${TARGET_BIN_DIR}/ \;
           find ./${BUILD_OUTPUT_DIR}/ -name "${INO_FILE}.partitions.bin" -exec mv {} ${TARGET_BIN_DIR}/ \;
-          find ~ -name "boot_app0.bin" -exec mv {} ${TARGET_BIN_DIR}/ \;
+          find ~/.arduino15 -name "boot_app0.bin" -exec cp {} ${TARGET_BIN_DIR}/ \;
 
       - name: copy esptool and Flash Scripts to Artifact Package
         run: |
